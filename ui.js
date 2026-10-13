@@ -102,6 +102,7 @@
   }
 
   function start() {
+    A.correctCatalogue();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -143,6 +144,7 @@
     }
 
     var session = s.session;
+    if (session && session.paused) { renderPaused(root, session, today); return; }
     if (session && session.index < session.plan.length) { renderSession(root, session, today); return; }
     if (session) { renderSummary(root, today); return; }
     renderLaunch(root, today);
@@ -223,9 +225,51 @@
 
     html += '</section>';
 
+    html += renderPlan(built.items, null);
     html += renderForecast(launchInfo.forecast, today);
 
     root.innerHTML = html;
+  }
+
+  function renderPlan(items, session) {
+    var html = '<section class="card day-plan"><h2>' + (session ? 'Session overview' : 'Today’s plan') + '</h2>';
+    if (!items.length) return html + '<p class="muted">No reviews in this session.</p></section>';
+    html += '<ol>';
+    items.forEach(function (entry, i) {
+      var p = entry.piece || A.pieceById(entry.pieceId);
+      if (!p) return;
+      var sec = entry.sectionId && p.sections.find(function (x) { return x.id === entry.sectionId; });
+      var r = session && session.results[i];
+      var status = !r ? 'To do' : r.skipped ? 'Skipped' : r.learning ? 'Recorded' : (r.grade === 'broke' ? 'Broke down' : r.grade === 'clean' ? 'Clean' : 'Wobbled');
+      var label = sec ? sec.label : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
+      html += '<li class="' + (r ? 'plan-recorded' : '') + '">' +
+        (session ? '<button class="plan-item" data-action="resume-item" data-index="' + i + '">' : '<div class="plan-item">') +
+        '<span class="plan-title">' + esc(p.title) + '</span><span class="plan-meta">' +
+        esc(A.composerName(p.composerId) + (p.catalogue ? ' · ' + p.catalogue : '')) + '</span>' +
+        '<span class="plan-meta">' + esc(label) + ' · ' + mins(entry.estMin) + ' min' +
+        (session ? ' · ' + status : '') + '</span>' + (session ? '</button>' : '</div>') + '</li>';
+    });
+    return html + '</ol></section>';
+  }
+
+  function renderPaused(root, session, today) {
+    var prog = A.sessionProgress();
+    var remaining = session.plan.reduce(function (n,it,i) { return n + (session.results[i] ? 0 : it.estMin); },0);
+    root.innerHTML = '<h1>Today</h1><p class="date-line">' + esc(longDate(today)) + '</p>' +
+      '<section class="card"><h2>Session paused</h2><p>' + prog.recorded + ' of ' + prog.total +
+      ' recorded · about ' + mins(remaining) + ' min left</p>' +
+      (session.date !== today ? '<p class="small muted">Continuing the plan from ' + esc(longDate(session.date)) + '.</p>' : '') +
+      '<button class="btn btn-primary btn-block" data-action="resume-paused">Resume session</button>' +
+      '<button class="btn btn-quiet btn-block" data-action="finish-session">Finish for now</button></section>' +
+      renderPlan(session.plan, session);
+  }
+
+  function pauseWithDraft() {
+    var it = A.currentItem(), draft = null;
+    if (it && el('learning-focus')) draft = {pieceId:it.piece.id, focus:el('learning-focus').value,
+      achievement:el('learning-achievement').value, nextFocus:el('learning-next').value};
+    A.pauseSession(draft);
+    refresh(); window.scrollTo(0,0);
   }
 
   function nextDueSummary(today) {
@@ -344,7 +388,7 @@
     var prog = A.sessionProgress();
 
     /* Progress strip doubles as navigation — tap any segment to jump. */
-    var html = '<div class="session-view"><div class="progress">';
+    var html = '<div class="session-view"><button class="btn session-pause" data-action="pause-session">Pause &amp; view plan</button><div class="progress">';
     for (var i = 0; i < session.plan.length; i++) {
       var r = session.results[i];
       var cls = r ? (r.skipped ? 'skipped' : 'done') : '';
@@ -380,6 +424,7 @@
         (sec.notes ? '<p>' + esc(sec.notes) + '</p>' : '') + '</div>';
     } else if (!isLearning) {
       html += '<p class="small muted">' + (p.state === 'repair' ? 'Repair the parts that need work. Grade the first attempt you use to check recall.' :
+        p.state === 'consolidating' && p.focusedMinutes ? 'Use this slot for focused practice. Grade the first attempt you use to check recall.' :
         'Whole-piece review. Grade your first attempt from memory, before practising this piece.') + '</p>';
     }
     if (p.notes) html += '<div class="np-notes">' + esc(p.notes) + '</div>';
@@ -431,16 +476,18 @@
 
   function renderLearningControl(p, it) {
     var last = p.history.filter(function (h) { return h.type === 'learning' && h.achievement; }).slice(-1)[0];
+    var draft = A.state().session && A.state().session.learningDraft;
+    if (!draft || draft.pieceId !== p.id) draft = null;
     return '<div class="learning-record">' +
       '<div class="field"><label for="learning-focus">Today’s focus</label>' +
-      '<textarea id="learning-focus" placeholder="Bars 17–24, hands together">' + esc(p.learningFocus) + '</textarea></div>' +
+      '<textarea id="learning-focus" placeholder="Bars 17–24, hands together">' + esc(draft ? draft.focus : p.learningFocus) + '</textarea></div>' +
       (last ? '<p class="small muted">Last time: ' + esc(last.achievement) + '</p>' : '') +
       '<div class="field"><label for="learning-achievement">What can you do now?</label>' +
       '<textarea id="learning-achievement" placeholder="From memory at 80 bpm; transition still uncertain">' +
-      esc(it.result && it.result.achievement || '') + '</textarea></div>' +
+      esc(draft ? draft.achievement : it.result && it.result.achievement || '') + '</textarea></div>' +
       '<div class="field"><label for="learning-next">Next focus</label>' +
       '<textarea id="learning-next" placeholder="Join bars 24–25 without stopping">' +
-      esc(it.result && it.result.nextFocus || '') + '</textarea></div>' +
+      esc(draft ? draft.nextFocus : it.result && it.result.nextFocus || '') + '</textarea></div>' +
       '<button class="btn btn-primary btn-block" data-action="save-learning">Record practice</button></div>';
   }
 
@@ -511,7 +558,7 @@
    * Repertoire
    * ------------------------------------------------------------------ */
 
-  function renderRepertoire() {
+  function renderRepertoire(listOnly) {
     var today = launchInfo.today;
     var root = el('screen-repertoire');
     var s = A.state();
@@ -545,6 +592,8 @@
       }).join('') + '</select>';
     html += '</div>';
 
+    html += '<div id="repertoire-results">';
+    var listStart = html.length;
     var filtered = A.filterPieces({
       tier: view.filters.tier === '' ? null : +view.filters.tier,
       state: view.filters.state || null,
@@ -586,19 +635,21 @@
     });
 
     if (!any) html += '<div class="empty-state"><p>No pieces match.</p></div>';
+    if (listOnly && el('repertoire-results')) { el('repertoire-results').innerHTML = html.slice(listStart); return; }
+    html += '</div>';
 
     html += '<div class="stack" style="margin-top:22px">' +
       '<button class="btn btn-block" data-action="export">Export backup</button>' +
       '<button class="btn btn-block" data-action="copy-export">Copy backup to clipboard</button>' +
       '<button class="btn btn-block" data-action="import">Import JSON</button>' +
-      '</div>';
+      '</div><p class="tiny muted">Repertoire ' + A.VERSION + '</p>';
 
     root.innerHTML = html;
 
-    el('f-search').oninput = function () { view.filters.search = this.value; renderRepertoire(); this.focus(); };
-    el('f-tier').onchange = function () { view.filters.tier = this.value; renderRepertoire(); };
-    el('f-state').onchange = function () { view.filters.state = this.value; renderRepertoire(); };
-    el('f-composer').onchange = function () { view.filters.composerId = this.value; renderRepertoire(); };
+    el('f-search').oninput = function () { view.filters.search = this.value; renderRepertoire(true); };
+    el('f-tier').onchange = function () { view.filters.tier = this.value; renderRepertoire(true); };
+    el('f-state').onchange = function () { view.filters.state = this.value; renderRepertoire(true); };
+    el('f-composer').onchange = function () { view.filters.composerId = this.value; renderRepertoire(true); };
   }
 
   function renderCapacityCard() {
@@ -709,6 +760,11 @@
         '<input type="date" data-field="nextDue" value="' + esc(d.nextDue || '') + '"></div>' +
         '</div>';
     }
+
+    if (d.state === 'consolidating') html += '<div class="field"><label>Consolidation interval (days)</label>' +
+      '<input type="number" min="1" max="20" data-field="consolidatingIntervalDays" value="' + (d.consolidatingIntervalDays || 3) + '"></div>';
+    if (d.state === 'consolidating' || d.state === 'repair') html += '<div class="field"><label>Focused practice (minutes; blank = usual estimate)</label>' +
+      '<input type="number" min="0.5" step="0.5" data-field="focusedMinutes" value="' + (d.focusedMinutes || '') + '"></div>';
 
     html += '<div class="field-row">' +
       '<div class="field"><label>Prior knowledge</label><select data-field="priorKnowledge">' +
@@ -879,10 +935,13 @@
       catch (e) { alert('That file is not valid JSON.'); return; }
 
       var pv = A.previewImport(json);
-      if (!pv.ok) { alert('Unrecognised file format.'); return; }
+      if (!pv.ok) { alert(pv.missing && pv.missing.length ? 'Could not match: ' + pv.missing.join(', ') + '. Import your Chopin backup first.' : 'Unrecognised or invalid file format.'); return; }
+      if (pv.alreadyApplied) { alert('This practice update has already been applied.'); return; }
 
       var msg;
-      if (pv.mode === 'replace') {
+      if (pv.mode === 'practice-update') {
+        msg = 'Practice update: ' + pv.plays + ' plays across ' + pv.pieces + ' pieces.\n\nAdds the reported practice and adjusts the requested schedules. Keeps your other pieces, sections, notes and newer reviews. Your current session plan will close; recorded results stay saved. Apply?';
+      } else if (pv.mode === 'replace') {
         msg = 'Full backup: ' + pv.pieces + ' pieces, ' + pv.sections + ' sections, ' +
           pv.composers + ' composers.\n\nThis REPLACES everything currently stored. Continue?';
       } else {
@@ -891,6 +950,7 @@
       }
       if (!confirm(msg)) return;
       A.commitImport(pv);
+      A.correctCatalogue();
       view.minutes = null;
       refresh();
     };
@@ -920,6 +980,9 @@
     var d = view.editing;
 
     switch (action) {
+      case 'pause-session': pauseWithDraft(); break;
+      case 'resume-paused': A.resumeSession(); refresh(); break;
+      case 'resume-item': A.resumeSession(null, +t.getAttribute('data-index')); refresh(); break;
       case 'more':
         view.minutes += 5;
         renderToday();
@@ -1127,6 +1190,7 @@
       title: d.title, catalogue: d.catalogue, composerId: d.composerId,
       tier: +d.tier, state: d.state, durationMin: d.durationMin, contentMin: d.contentMin,
       fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
+      consolidatingIntervalDays: d.consolidatingIntervalDays, focusedMinutes: d.focusedMinutes,
       tags: String(d.tags).split(',').map(function (x) { return x.trim(); }).filter(Boolean)
     };
 

@@ -251,7 +251,7 @@
      * one that is a third written into the hands. */
     if (raw.pct != null) e.pct = clamp(Math.round(num(raw.pct, 0)), 0, 100);
     if (raw.sectionId) e.sectionId = str(raw.sectionId);
-    ['focus', 'achievement', 'nextFocus', 'stateBefore'].forEach(function (k) { if (raw[k] != null) e[k] = str(raw[k]); });
+    ['focus', 'achievement', 'nextFocus', 'stateBefore', 'note', 'updateId'].forEach(function (k) { if (raw[k] != null) e[k] = str(raw[k]); });
     ['elapsedDays', 'intervalBefore'].forEach(function (k) { if (raw[k] != null) e[k] = num(raw[k], null); });
     if (raw.early != null) e.early = raw.early === true;
     return e;
@@ -275,6 +275,8 @@
       notes: str(raw.notes),
       learningFocus: str(raw.learningFocus),
       learningAchievement: str(raw.learningAchievement),
+      consolidatingIntervalDays: clamp(Math.round(num(raw.consolidatingIntervalDays, 3)), 1, 20),
+      focusedMinutes: raw.focusedMinutes == null || raw.focusedMinutes === '' ? null : Math.max(0.5, num(raw.focusedMinutes, 5)),
       state: state,
       intervalDays: raw.intervalDays == null ? null : Math.max(1, Math.round(num(raw.intervalDays, 1))),
       lastPlayed: isoOrNull(raw.lastPlayed),
@@ -358,6 +360,7 @@
           nudgedFor: isoOrNull(watch.nudgedFor)
         }
       },
+      appliedUpdates: Array.isArray(raw.appliedUpdates) ? raw.appliedUpdates.filter(function (id) { return typeof id === 'string'; }) : [],
       composers: Array.isArray(raw.composers) ? raw.composers.map(normalizeComposer).filter(function (c) { return c.id; }) : [],
       pieces: Array.isArray(raw.pieces) ? raw.pieces.map(normalizePiece).filter(function (p) { return p.id; }) : [],
       session: raw.session && typeof raw.session === 'object' ? normalizeSession(raw.session) : null,
@@ -384,7 +387,10 @@
      * order and any item re-recorded in place. */
     var results = new Array(plan.length);
     var src = Array.isArray(raw.results) ? raw.results : [];
-    for (var i = 0; i < plan.length; i++) results[i] = src[i] || null;
+    for (var i = 0; i < plan.length; i++) {
+      results[i] = src[i] || null;
+      if (results[i] && !results[i].date) results[i].date = isoOrNull(raw.date);
+    }
 
     return {
       date: isoOrNull(raw.date),
@@ -395,7 +401,9 @@
       deferredCount: Math.max(0, Math.round(num(raw.deferredCount, 0))),
       deferredMin: Math.max(0, num(raw.deferredMin, 0)),
       startedAt: isoOrNull(raw.startedAt),
-      finished: raw.finished === true
+      finished: raw.finished === true,
+      paused: raw.paused === true,
+      learningDraft: raw.learningDraft && typeof raw.learningDraft === 'object' ? raw.learningDraft : null
     };
   }
 
@@ -516,7 +524,10 @@
     return dates;
   }
 
-  function pieceCost(p) { return p.durationMin * TUNING.maintenanceCostFactor; }
+  function pieceCost(p) {
+    if ((p.state === 'repair' || p.state === 'consolidating') && p.focusedMinutes) return p.focusedMinutes;
+    return p.durationMin * TUNING.maintenanceCostFactor;
+  }
 
   function isScheduled(p) { return SCHEDULED_STATES.indexOf(p.state) >= 0; }
 
@@ -574,7 +585,7 @@
       case 'consolidating':
         /* Fixed 3-day cadence. Does not enter repair: a piece that is not
          * yet established has nothing to fall back to. */
-        p.intervalDays = TUNING.consolidatingIntervalDays;
+        p.intervalDays = p.consolidatingIntervalDays || TUNING.consolidatingIntervalDays;
         p.nextDue = addDays(today, p.intervalDays);
         break;
 
@@ -734,7 +745,7 @@
     today = today || todayISO();
     if (p.state === 'learning') {
       setPieceState(p, 'consolidating', today);
-      p.intervalDays = TUNING.consolidatingIntervalDays;
+      p.intervalDays = p.consolidatingIntervalDays || TUNING.consolidatingIntervalDays;
       p.nextDue = addDays(today, p.intervalDays);
     } else if (p.state === 'consolidating') {
       setPieceState(p, 'established', today);
@@ -766,7 +777,7 @@
         break;
       case 'consolidating':
         if (!p.dateFirstLearned) p.dateFirstLearned = today;
-        p.intervalDays = TUNING.consolidatingIntervalDays;
+        p.intervalDays = p.consolidatingIntervalDays || TUNING.consolidatingIntervalDays;
         p.nextDue = today;
         break;
       case 'established':
@@ -1110,7 +1121,7 @@
       deferredCount: built.deferredCount,
       deferredMin: built.deferredMin,
       startedAt: today,
-      finished: false
+      finished: false, paused: false, learningDraft: null
     };
     store.settings.lastSessionDate = today;
     logCapacity(built);
@@ -1182,7 +1193,7 @@
     if (!r) return false;
     var p = pieceById(r.pieceId);
     if (p) { var target = r.sectionId ? sectionById(p, r.sectionId) : p; if (target) restorePiece(target, r.snapshot); }
-    if (!r.skipped) addActualMinutes(s.date, -num(r.countedMin, 0));
+    if (!r.skipped) addActualMinutes(r.date || s.date, -num(r.countedMin, 0));
     s.results[i] = null;
     return true;
   }
@@ -1197,7 +1208,7 @@
     clearResultAt(i);                       // re-recording never stacks
     var p = it.piece;
     var snap = snapshotPiece(it.subject);
-    var result = { pieceId: p.id, sectionId: it.section ? it.section.id : null, snapshot: snap, countedMin: 0 };
+    var result = { date: s.date, pieceId: p.id, sectionId: it.section ? it.section.id : null, snapshot: snap, countedMin: 0 };
 
     if (payload.skip) {
       /* Skipping is never a failure: no history entry, no lapse, no state
@@ -1256,7 +1267,11 @@
   }
 
   function gradeCurrent(grade) { return recordCurrent({ grade: grade }); }
-  function setLearningCurrent(payload) { return recordCurrent(payload || {}); }
+  function setLearningCurrent(payload) {
+    var r = recordCurrent(payload || {});
+    if (store.session) { store.session.learningDraft = null; save(); }
+    return r;
+  }
   function setProgressCurrent(pct) { return recordCurrent({ pct: pct }); }
   function skipCurrent() {
     var r = recordCurrent({ skip: true });
@@ -1267,7 +1282,7 @@
     var s = store.session;
     if (!s) return false;
     s.index = clamp(Math.round(i), 0, s.plan.length);
-    s.finished = false;
+    s.finished = false; s.paused = false;
     save();
     return true;
   }
@@ -1300,12 +1315,36 @@
     };
   }
 
+  function pauseSession(draft) {
+    var s = store.session;
+    if (!s) return;
+    if (draft) s.learningDraft = draft;
+    s.paused = true; save();
+  }
+
+  function resumeSession(today, index) {
+    var s = store.session;
+    if (!s) return null;
+    today = today || todayISO();
+    if (s.date !== today) {
+      s.results.forEach(function (r) { if (r && !r.date) r.date = s.date; });
+      s.date = today;
+    }
+    s.paused = false; s.finished = false;
+    if (index != null) s.index = clamp(Math.round(index), 0, s.plan.length);
+    else {
+      s.index = s.results.findIndex(function (r) { return !r; });
+      if (s.index < 0) s.index = s.plan.length;
+    }
+    save(); return s;
+  }
+
   /* The user may end a session early — with learning last, that is the
    * intended way to drop it when time runs out. */
   function finishSession() {
     var s = store.session;
     if (!s) return;
-    s.finished = true;
+    s.finished = true; s.paused = false;
     s.index = s.plan.length;
     save();
   }
@@ -1601,6 +1640,7 @@
 
   function detectFormat(json) {
     if (!json || typeof json !== 'object') return 'unknown';
+    if (json.format === 'repertoire-practice-update' && Array.isArray(json.plays)) return 'practice-update';
     if (Array.isArray(json.preludes)) return 'chopin';
     if (Array.isArray(json.pieces)) return 'repertoire';
     return 'unknown';
@@ -1688,10 +1728,61 @@
 
   function pieceKey(p) { return p.composerId + '\u0000' + p.catalogue; }
 
+  function previewPracticeUpdate(json, today) {
+    today = today || todayISO();
+    if (!str(json.id) || !json.plays.length || json.plays.length > 200) return {ok:false};
+    var plays = [], missing = [], invalid = false;
+    json.plays.forEach(function (raw) {
+      if (!raw || !isoOrNull(raw.date) || raw.date > today || !str(raw.catalogue)) { invalid = true; return; }
+      var matches = store.pieces.filter(function (p) { return p.composerId === raw.composerId && p.catalogue === raw.catalogue; });
+      if (matches.length !== 1) { missing.push(raw.catalogue); return; }
+      var fields = raw.fields || {};
+      if (fields.state != null && STATES.indexOf(fields.state) < 0) { invalid = true; return; }
+      plays.push({pieceId: matches[0].id, date: raw.date, note: str(raw.note), fields: fields});
+    });
+    return {format:'practice-update', mode:'practice-update', ok: !invalid && !missing.length,
+      missing: missing, id: json.id, alreadyApplied: store.appliedUpdates.indexOf(json.id) >= 0,
+      pieces: Array.from(new Set(plays.map(function (e) { return e.pieceId; }))).length,
+      plays: plays.length, payload: plays.sort(function (a,b) { return a.date.localeCompare(b.date); })};
+  }
+
+  function commitPracticeUpdate(preview) {
+    if (store.appliedUpdates.indexOf(preview.id) >= 0) return {alreadyApplied:true};
+    preview.payload.forEach(function (entry) {
+      var p = pieceById(entry.pieceId), f = entry.fields;
+      if (!p) return;
+      var newer = p.lastPlayed && p.lastPlayed > entry.date;
+      // Add evidence only if a whole-piece record for this date is absent.
+      if (!p.history.some(function (h) { return h.date === entry.date && !h.sectionId; })) {
+        p.history.push({date:entry.date, type:historyType(p.state), grade:null, note:entry.note, updateId:preview.id});
+        p.history.sort(function (a,b) { return String(a.date).localeCompare(String(b.date)); });
+      }
+      if (newer && !Object.keys(f).length) return;
+      if (f.state) setStateManually(p, f.state, entry.date);
+      if (f.consolidatingIntervalDays != null) p.consolidatingIntervalDays = clamp(Math.round(num(f.consolidatingIntervalDays, 3)),1,20);
+      if (f.focusedMinutes != null) p.focusedMinutes = Math.max(0.5,num(f.focusedMinutes,5));
+      if (isoOrNull(f.dateFirstLearned)) p.dateFirstLearned = f.dateFirstLearned;
+      if (str(f.removeExactNote) && p.notes.trim() === f.removeExactNote) p.notes = '';
+      if (str(f.practiceNote) && p.notes.indexOf(f.practiceNote) < 0) p.notes += (p.notes ? '\n' : '') + f.practiceNote;
+      if (!newer) p.lastPlayed = entry.date;
+      if (p.state === 'consolidating') p.intervalDays = p.consolidatingIntervalDays;
+      else if (p.state === 'learning' || p.state === 'repair') p.intervalDays = 1;
+      if (isScheduled(p)) p.nextDue = addDays(p.lastPlayed, p.intervalDays || 3);
+    });
+    var latest = preview.payload[preview.payload.length - 1].date;
+    if (!store.settings.lastSessionDate || store.settings.lastSessionDate < latest) store.settings.lastSessionDate = latest;
+    store.appliedUpdates.push(preview.id);
+    // Discard only the old plan: recorded grades remain in piece history.
+    // Prevent an old session snapshot from undoing this correction later.
+    store.session = null;
+    save(); return {updated:preview.pieces, plays:preview.plays};
+  }
+
   /* Summary before committing anything. */
   function previewImport(json, today) {
     var format = detectFormat(json);
     if (format === 'unknown') return { format: 'unknown', ok: false };
+    if (format === 'practice-update') return previewPracticeUpdate(json, today);
 
     if (format === 'repertoire') {
       /* A full export is a restore, not a merge — it replaces state. */
@@ -1747,6 +1838,7 @@
     if (!preview || !preview.ok) return null;
     today = today || todayISO();
 
+    if (preview.mode === 'practice-update') return commitPracticeUpdate(preview);
     if (preview.mode === 'replace') {
       store = preview.payload;
       save();
@@ -1934,6 +2026,8 @@
     if (fields.contentMin != null) p.contentMin = Math.max(0.1, num(fields.contentMin, p.contentMin));
     if (fields.fragility != null) p.fragility = clamp(num(fields.fragility, p.fragility), 1, 5);
     if (Array.isArray(fields.tags)) p.tags = fields.tags.map(function (t) { return str(t); }).filter(Boolean);
+    if (fields.consolidatingIntervalDays != null) p.consolidatingIntervalDays = clamp(Math.round(num(fields.consolidatingIntervalDays, 3)), 1, 20);
+    if (fields.focusedMinutes !== undefined) p.focusedMinutes = fields.focusedMinutes === '' || fields.focusedMinutes === null ? null : Math.max(0.5, num(fields.focusedMinutes, 5));
     if (fields.learnedPct != null) p.learnedPct = clamp(Math.round(num(fields.learnedPct, p.learnedPct)), 0, 100);
     if (fields.dateFirstLearned !== undefined) p.dateFirstLearned = isoOrNull(fields.dateFirstLearned);
     if (fields.lastPlayed !== undefined) p.lastPlayed = isoOrNull(fields.lastPlayed);
@@ -1950,6 +2044,9 @@
       }
     }
 
+    if (p.state === 'consolidating' && fields.consolidatingIntervalDays != null) {
+      p.intervalDays = p.consolidatingIntervalDays; p.nextDue = addDays(p.lastPlayed || today, p.intervalDays);
+    }
     if (fragilityChanged) { reclampInterval(p, today); prepareSections(p, today); }
     save();
     return p;
@@ -2089,6 +2186,45 @@
    * Seed
    * ------------------------------------------------------------------ */
 
+  /* One-time correction of the supplied catalogue. Never replaces practice state. */
+  function correctCatalogue() {
+    var correction = {"id": "catalogue-completion-20261013", "composers": [{"id": "zhangzhao", "canonicalName": "Zhang Zhao", "aliases": []}, {"id": "hensel", "canonicalName": "Fanny Hensel", "aliases": ["Fanny Mendelssohn"]}], "pieces": [{"id": "p077", "composerId": "zhangzhao", "title": "Forest Meditation", "catalogue": "", "tier": 1, "durationMin": 2, "contentMin": 2, "fragility": 3, "priorKnowledge": "new", "tags": [], "state": "backlog", "sections": []}, {"id": "p078", "composerId": "hensel", "title": "September", "catalogue": "Das Jahr", "tier": 2, "durationMin": 3, "contentMin": 3, "fragility": 3, "priorKnowledge": "new", "tags": [], "state": "backlog", "sections": []}, {"id": "p079", "composerId": "chopin", "title": "Waltz in D-flat major", "catalogue": "Op. 64 No. 1", "tier": 3, "durationMin": 2, "contentMin": 2, "fragility": 3, "priorKnowledge": "new", "tags": [], "state": "backlog", "sections": []}, {"id": "p080", "composerId": "chopin", "title": "Waltz in A-flat major", "catalogue": "Op. 64 No. 3", "tier": 3, "durationMin": 3, "contentMin": 3, "fragility": 3, "priorKnowledge": "new", "tags": [], "state": "backlog", "sections": []}, {"id": "p081", "composerId": "chopin", "title": "Waltz in C-sharp minor", "catalogue": "Op. 64 No. 2", "tier": 3, "durationMin": 3.5, "contentMin": 3.5, "fragility": 3, "priorKnowledge": "new", "tags": [], "state": "backlog", "sections": []}], "durations": [{"composerId": "bach", "catalogue": "Goldberg Variations BWV 988", "title": "Aria", "durationMin": 3}, {"composerId": "scarlatti", "catalogue": "K. 466", "title": "Sonata in F minor", "durationMin": 3}, {"composerId": "joplin", "catalogue": "", "title": "Solace", "durationMin": 2.5}, {"composerId": "prokofiev", "catalogue": "Op. 22", "title": "Visions fugitives No. 15", "durationMin": 1}]};
+    if (store.appliedUpdates.indexOf(correction.id) >= 0 || needsSeed()) return false;
+    var composerIds = {};
+    correction.composers.forEach(function (incoming) {
+      var names = [incoming.canonicalName].concat(incoming.aliases).map(slugify);
+      var existing = store.composers.find(function (c) {
+        return c.id === incoming.id || [c.canonicalName].concat(c.aliases).some(function (name) { return names.indexOf(slugify(name)) >= 0; });
+      });
+      if (!existing) { existing = normalizeComposer(incoming); store.composers.push(existing); }
+      composerIds[incoming.id] = existing.id;
+    });
+    function matchingPiece(incoming) {
+      var cid = composerIds[incoming.composerId] || incoming.composerId;
+      var candidates = store.pieces.filter(function (p) { return p.composerId === cid; });
+      var catalogueMatches = incoming.catalogue ? candidates.filter(function (p) { return p.catalogue === incoming.catalogue; }) : [];
+      if (catalogueMatches.length === 1) return catalogueMatches[0];
+      return candidates.find(function (p) { return slugify(p.title) === slugify(incoming.title); });
+    }
+    correction.pieces.forEach(function (incoming) {
+      if (matchingPiece(incoming)) return;
+      var p = normalizePiece(incoming);
+      p.id = nextPieceId();
+      p.composerId = composerIds[p.composerId] || p.composerId;
+      store.pieces.push(p);
+    });
+    correction.durations.forEach(function (incoming) {
+      var p = matchingPiece(incoming);
+      if (!p) return;
+      p.durationMin = incoming.durationMin;
+      p.contentMin = incoming.durationMin;
+      refreshPlanEstimate(p.id);
+    });
+    store.appliedUpdates.push(correction.id);
+    save();
+    return true;
+  }
+
   function needsSeed() { return store.pieces.length === 0 && store.composers.length === 0; }
 
   function bootstrapFromSeed(json, today) {
@@ -2120,7 +2256,8 @@
      * nothing is lost by dropping it. */
     var dropped = false;
     if (store.session && store.session.date !== today) {
-      store.session = null;
+      if (!store.session.finished) store.session.paused = true;
+      else store.session = null;
       dropped = true;
     }
 
@@ -2151,6 +2288,7 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
+    VERSION: '5.2',
     TUNING: TUNING,
     CAPS: CAPS,
     STORAGE_KEY: STORAGE_KEY,
@@ -2233,6 +2371,8 @@
     stepIndex: stepIndex,
     sessionProgress: sessionProgress,
     finishSession: finishSession,
+    pauseSession: pauseSession,
+    resumeSession: resumeSession,
     refreshPlanEstimate: refreshPlanEstimate,
     recordLearningProgress: recordLearningProgress,
     daysLearning: daysLearning,
@@ -2276,6 +2416,7 @@
     groupByTier: groupByTier,
 
     // seed / launch
+    correctCatalogue: correctCatalogue,
     needsSeed: needsSeed,
     bootstrapFromSeed: bootstrapFromSeed,
     launch: launch

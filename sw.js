@@ -9,7 +9,7 @@
  * indefinitely, with no error to tell you why.
  */
 
-var CACHE_VERSION = 'v4-sections-20261013-final';
+var CACHE_VERSION = 'v5-2-gold-20261013';
 var CACHE = 'repertoire-' + CACHE_VERSION;
 
 var ASSETS = [
@@ -20,9 +20,9 @@ var ASSETS = [
   './ui.js',
   './seed.json',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './apple-touch-icon.png'
+  './icon-192-gold.png',
+  './icon-512-gold.png',
+  './apple-touch-icon-gold.png'
 ];
 
 self.addEventListener('install', function (e) {

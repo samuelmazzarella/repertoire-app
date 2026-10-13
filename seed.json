@@ -1,1117 +1,1535 @@
 {
- "composers": [
-  {
-   "id": "bach",
-   "canonicalName": "J.S. Bach",
-   "era": "Baroque",
-   "nationality": "German",
-   "aliases": []
-  },
-  {
-   "id": "scarlatti",
-   "canonicalName": "Domenico Scarlatti",
-   "era": "Baroque",
-   "nationality": "Italian",
-   "aliases": []
-  },
-  {
-   "id": "haydn",
-   "canonicalName": "Joseph Haydn",
-   "era": "Classical",
-   "nationality": "Austrian",
-   "aliases": []
-  },
-  {
-   "id": "mozart",
-   "canonicalName": "W.A. Mozart",
-   "era": "Classical",
-   "nationality": "Austrian",
-   "aliases": []
-  },
-  {
-   "id": "beethoven",
-   "canonicalName": "Ludwig van Beethoven",
-   "era": "Classical/Romantic",
-   "nationality": "German",
-   "aliases": []
-  },
-  {
-   "id": "schubert",
-   "canonicalName": "Franz Schubert",
-   "era": "Romantic",
-   "nationality": "Austrian",
-   "aliases": []
-  },
-  {
-   "id": "cschumann",
-   "canonicalName": "Clara Schumann",
-   "era": "Romantic",
-   "nationality": "German",
-   "aliases": []
-  },
-  {
-   "id": "rschumann",
-   "canonicalName": "Robert Schumann",
-   "era": "Romantic",
-   "nationality": "German",
-   "aliases": []
-  },
-  {
-   "id": "chopin",
-   "canonicalName": "Frédéric Chopin",
-   "era": "Romantic",
-   "nationality": "Polish",
-   "aliases": []
-  },
-  {
-   "id": "liszt",
-   "canonicalName": "Franz Liszt",
-   "era": "Romantic",
-   "nationality": "Hungarian",
-   "aliases": []
-  },
-  {
-   "id": "mendelssohn",
-   "canonicalName": "Felix Mendelssohn",
-   "era": "Romantic",
-   "nationality": "German",
-   "aliases": []
-  },
-  {
-   "id": "brahms",
-   "canonicalName": "Johannes Brahms",
-   "era": "Romantic",
-   "nationality": "German",
-   "aliases": []
-  },
-  {
-   "id": "grieg",
-   "canonicalName": "Edvard Grieg",
-   "era": "Romantic",
-   "nationality": "Norwegian",
-   "aliases": []
-  },
-  {
-   "id": "tchaikovsky",
-   "canonicalName": "Pyotr Tchaikovsky",
-   "era": "Romantic",
-   "nationality": "Russian",
-   "aliases": []
-  },
-  {
-   "id": "faure",
-   "canonicalName": "Gabriel Fauré",
-   "era": "Late Romantic",
-   "nationality": "French",
-   "aliases": []
-  },
-  {
-   "id": "debussy",
-   "canonicalName": "Claude Debussy",
-   "era": "Impressionist",
-   "nationality": "French",
-   "aliases": []
-  },
-  {
-   "id": "ravel",
-   "canonicalName": "Maurice Ravel",
-   "era": "Impressionist",
-   "nationality": "French",
-   "aliases": []
-  },
-  {
-   "id": "granados",
-   "canonicalName": "Enrique Granados",
-   "era": "Late Romantic",
-   "nationality": "Spanish",
-   "aliases": []
-  },
-  {
-   "id": "scriabin",
-   "canonicalName": "Alexander Scriabin",
-   "era": "Late Romantic",
-   "nationality": "Russian",
-   "aliases": []
-  },
-  {
-   "id": "rachmaninoff",
-   "canonicalName": "Sergei Rachmaninoff",
-   "era": "Late Romantic",
-   "nationality": "Russian",
-   "aliases": []
-  },
-  {
-   "id": "joplin",
-   "canonicalName": "Scott Joplin",
-   "era": "Ragtime",
-   "nationality": "American",
-   "aliases": []
-  },
-  {
-   "id": "bartok",
-   "canonicalName": "Béla Bartók",
-   "era": "Modern",
-   "nationality": "Hungarian",
-   "aliases": []
-  },
-  {
-   "id": "prokofiev",
-   "canonicalName": "Sergei Prokofiev",
-   "era": "Modern",
-   "nationality": "Russian",
-   "aliases": []
-  },
-  {
-   "id": "villalobos",
-   "canonicalName": "Heitor Villa-Lobos",
-   "era": "Modern",
-   "nationality": "Brazilian",
-   "aliases": []
-  },
-  {
-   "id": "gershwin",
-   "canonicalName": "George Gershwin",
-   "era": "Modern",
-   "nationality": "American",
-   "aliases": []
-  },
-  {
-   "id": "price",
-   "canonicalName": "Florence Price",
-   "era": "Modern",
-   "nationality": "American",
-   "aliases": []
-  },
-  {
-   "id": "still",
-   "canonicalName": "William Grant Still",
-   "era": "Modern",
-   "nationality": "American",
-   "aliases": []
-  },
-  {
-   "id": "shostakovich",
-   "canonicalName": "Dmitri Shostakovich",
-   "era": "Modern",
-   "nationality": "Russian",
-   "aliases": []
-  },
-  {
-   "id": "part",
-   "canonicalName": "Arvo Pärt",
-   "era": "Contemporary",
-   "nationality": "Estonian",
-   "aliases": []
-  },
-  {
-   "id": "glass",
-   "canonicalName": "Philip Glass",
-   "era": "Contemporary",
-   "nationality": "American",
-   "aliases": []
-  },
-  {
-   "id": "satie",
-   "canonicalName": "Erik Satie",
-   "era": "Modern",
-   "nationality": "French",
-   "aliases": []
-  }
- ],
- "pieces": [
-  {
-   "id": "p001",
-   "composerId": "satie",
-   "title": "Gymnopédie No. 1",
-   "catalogue": "",
-   "tier": 0,
-   "durationMin": 3.5,
-   "contentMin": 3.5,
-   "fragility": 1,
-   "priorKnowledge": "near",
-   "tags": [
-    "slow",
-    "serene"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p002",
-   "composerId": "rschumann",
-   "title": "Von fremden Ländern und Menschen",
-   "catalogue": "Kinderszenen No. 1",
-   "tier": 0,
-   "durationMin": 2.0,
-   "contentMin": 2.0,
-   "fragility": 1,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "tender"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p003",
-   "composerId": "rschumann",
-   "title": "Träumerei",
-   "catalogue": "Kinderszenen No. 7",
-   "tier": 0,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "tender"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p004",
-   "composerId": "part",
-   "title": "Für Alina",
-   "catalogue": "",
-   "tier": 0,
-   "durationMin": 3.5,
-   "contentMin": 3.5,
-   "fragility": 1,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "still"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p005",
-   "composerId": "shostakovich",
-   "title": "Prelude in D major",
-   "catalogue": "Op. 87 No. 5",
-   "tier": 0,
-   "durationMin": 2.0,
-   "contentMin": 2.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "moderate",
-    "playful"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p006",
-   "composerId": "glass",
-   "title": "Opening",
-   "catalogue": "Glassworks",
-   "tier": 0,
-   "durationMin": 3.0,
-   "contentMin": 3.0,
-   "fragility": 1,
-   "priorKnowledge": "near",
-   "tags": [
-    "slow",
-    "hypnotic"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p007",
-   "composerId": "debussy",
-   "title": "La fille aux cheveux de lin",
-   "catalogue": "Préludes I No. 8",
-   "tier": 0,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "lyrical"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p008",
-   "composerId": "rachmaninoff",
-   "title": "Prelude in B major",
-   "catalogue": "Op. 32 No. 11",
-   "tier": 0,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 3,
-   "priorKnowledge": "played",
-   "tags": [
-    "moderate",
-    "lyrical"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p009",
-   "composerId": "beethoven",
-   "title": "Adagio cantabile",
-   "catalogue": "Pathétique Op. 13 ii",
-   "tier": 0,
-   "durationMin": 5.0,
-   "contentMin": 5.0,
-   "fragility": 2,
-   "priorKnowledge": "near",
-   "tags": [
-    "slow",
-    "songful"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p010",
-   "composerId": "beethoven",
-   "title": "Adagio sostenuto",
-   "catalogue": "Moonlight Op. 27 No. 2 i",
-   "tier": 0,
-   "durationMin": 5.5,
-   "contentMin": 5.5,
-   "fragility": 2,
-   "priorKnowledge": "near",
-   "tags": [
-    "slow",
-    "brooding"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p011",
-   "composerId": "debussy",
-   "title": "Clair de lune",
-   "catalogue": "Suite bergamasque iii",
-   "tier": 0,
-   "durationMin": 5.0,
-   "contentMin": 5.0,
-   "fragility": 3,
-   "priorKnowledge": "near",
-   "tags": [
-    "slow",
-    "luminous"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p012",
-   "composerId": "grieg",
-   "title": "Arietta",
-   "catalogue": "Op. 12 No. 1",
-   "tier": 1,
-   "durationMin": 1.5,
-   "contentMin": 1.5,
-   "fragility": 1,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "tender"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p013",
-   "composerId": "chopin",
-   "title": "Étude in C minor",
-   "catalogue": "Op. 25 No. 12",
-   "tier": 1,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 5,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "stormy"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p014",
-   "composerId": "cschumann",
-   "title": "Romance in E-flat minor",
-   "catalogue": "Op. 11 No. 1",
-   "tier": 1,
-   "durationMin": 3.5,
-   "contentMin": 3.5,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "dark"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p015",
-   "composerId": "liszt",
-   "title": "Consolation No. 3",
-   "catalogue": "S. 172",
-   "tier": 1,
-   "durationMin": 4.0,
-   "contentMin": 4.0,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "singing"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p016",
-   "composerId": "rachmaninoff",
-   "title": "Prelude in G minor",
-   "catalogue": "Op. 23 No. 5",
-   "tier": 1,
-   "durationMin": 4.0,
-   "contentMin": 4.0,
-   "fragility": 5,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "martial"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p017",
-   "composerId": "bach",
-   "title": "Aria",
-   "catalogue": "Goldberg Variations BWV 988",
-   "tier": 1,
-   "durationMin": 4.5,
-   "contentMin": 3.0,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "ornate"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p018",
-   "composerId": "mozart",
-   "title": "Fantasia in D minor",
-   "catalogue": "K. 397",
-   "tier": 1,
-   "durationMin": 5.0,
-   "contentMin": 5.0,
-   "fragility": 3,
-   "priorKnowledge": "played",
-   "tags": [
-    "varied",
-    "operatic"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p019",
-   "composerId": "brahms",
-   "title": "Intermezzo in A major",
-   "catalogue": "Op. 118 No. 2",
-   "tier": 1,
-   "durationMin": 5.5,
-   "contentMin": 5.5,
-   "fragility": 3,
-   "priorKnowledge": "near",
-   "tags": [
-    "slow",
-    "autumnal"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p020",
-   "composerId": "debussy",
-   "title": "La cathédrale engloutie",
-   "catalogue": "Préludes I No. 10",
-   "tier": 1,
-   "durationMin": 6.0,
-   "contentMin": 6.0,
-   "fragility": 4,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "monumental"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p021",
-   "composerId": "ravel",
-   "title": "Pavane pour une infante défunte",
-   "catalogue": "",
-   "tier": 1,
-   "durationMin": 6.0,
-   "contentMin": 6.0,
-   "fragility": 4,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "noble"
-   ],
-   "state": "backlog",
-   "sections": [
+  "composers": [
     {
-     "id": "s1",
-     "label": "Final page",
-     "startBar": null,
-     "endBar": null,
-     "fragilityOverride": 5,
-     "lastColdCall": null,
-     "failCount": 0
+      "id": "bach",
+      "canonicalName": "J.S. Bach",
+      "era": "Baroque",
+      "nationality": "German",
+      "aliases": []
+    },
+    {
+      "id": "scarlatti",
+      "canonicalName": "Domenico Scarlatti",
+      "era": "Baroque",
+      "nationality": "Italian",
+      "aliases": []
+    },
+    {
+      "id": "haydn",
+      "canonicalName": "Joseph Haydn",
+      "era": "Classical",
+      "nationality": "Austrian",
+      "aliases": []
+    },
+    {
+      "id": "mozart",
+      "canonicalName": "W.A. Mozart",
+      "era": "Classical",
+      "nationality": "Austrian",
+      "aliases": []
+    },
+    {
+      "id": "beethoven",
+      "canonicalName": "Ludwig van Beethoven",
+      "era": "Classical/Romantic",
+      "nationality": "German",
+      "aliases": []
+    },
+    {
+      "id": "schubert",
+      "canonicalName": "Franz Schubert",
+      "era": "Romantic",
+      "nationality": "Austrian",
+      "aliases": []
+    },
+    {
+      "id": "cschumann",
+      "canonicalName": "Clara Schumann",
+      "era": "Romantic",
+      "nationality": "German",
+      "aliases": []
+    },
+    {
+      "id": "rschumann",
+      "canonicalName": "Robert Schumann",
+      "era": "Romantic",
+      "nationality": "German",
+      "aliases": []
+    },
+    {
+      "id": "chopin",
+      "canonicalName": "Frédéric Chopin",
+      "era": "Romantic",
+      "nationality": "Polish",
+      "aliases": []
+    },
+    {
+      "id": "liszt",
+      "canonicalName": "Franz Liszt",
+      "era": "Romantic",
+      "nationality": "Hungarian",
+      "aliases": []
+    },
+    {
+      "id": "mendelssohn",
+      "canonicalName": "Felix Mendelssohn",
+      "era": "Romantic",
+      "nationality": "German",
+      "aliases": []
+    },
+    {
+      "id": "brahms",
+      "canonicalName": "Johannes Brahms",
+      "era": "Romantic",
+      "nationality": "German",
+      "aliases": []
+    },
+    {
+      "id": "grieg",
+      "canonicalName": "Edvard Grieg",
+      "era": "Romantic",
+      "nationality": "Norwegian",
+      "aliases": []
+    },
+    {
+      "id": "tchaikovsky",
+      "canonicalName": "Pyotr Tchaikovsky",
+      "era": "Romantic",
+      "nationality": "Russian",
+      "aliases": []
+    },
+    {
+      "id": "faure",
+      "canonicalName": "Gabriel Fauré",
+      "era": "Late Romantic",
+      "nationality": "French",
+      "aliases": []
+    },
+    {
+      "id": "debussy",
+      "canonicalName": "Claude Debussy",
+      "era": "Impressionist",
+      "nationality": "French",
+      "aliases": []
+    },
+    {
+      "id": "ravel",
+      "canonicalName": "Maurice Ravel",
+      "era": "Impressionist",
+      "nationality": "French",
+      "aliases": []
+    },
+    {
+      "id": "granados",
+      "canonicalName": "Enrique Granados",
+      "era": "Late Romantic",
+      "nationality": "Spanish",
+      "aliases": []
+    },
+    {
+      "id": "scriabin",
+      "canonicalName": "Alexander Scriabin",
+      "era": "Late Romantic",
+      "nationality": "Russian",
+      "aliases": []
+    },
+    {
+      "id": "rachmaninoff",
+      "canonicalName": "Sergei Rachmaninoff",
+      "era": "Late Romantic",
+      "nationality": "Russian",
+      "aliases": []
+    },
+    {
+      "id": "joplin",
+      "canonicalName": "Scott Joplin",
+      "era": "Ragtime",
+      "nationality": "American",
+      "aliases": []
+    },
+    {
+      "id": "bartok",
+      "canonicalName": "Béla Bartók",
+      "era": "Modern",
+      "nationality": "Hungarian",
+      "aliases": []
+    },
+    {
+      "id": "prokofiev",
+      "canonicalName": "Sergei Prokofiev",
+      "era": "Modern",
+      "nationality": "Russian",
+      "aliases": []
+    },
+    {
+      "id": "villalobos",
+      "canonicalName": "Heitor Villa-Lobos",
+      "era": "Modern",
+      "nationality": "Brazilian",
+      "aliases": []
+    },
+    {
+      "id": "gershwin",
+      "canonicalName": "George Gershwin",
+      "era": "Modern",
+      "nationality": "American",
+      "aliases": []
+    },
+    {
+      "id": "price",
+      "canonicalName": "Florence Price",
+      "era": "Modern",
+      "nationality": "American",
+      "aliases": []
+    },
+    {
+      "id": "still",
+      "canonicalName": "William Grant Still",
+      "era": "Modern",
+      "nationality": "American",
+      "aliases": []
+    },
+    {
+      "id": "shostakovich",
+      "canonicalName": "Dmitri Shostakovich",
+      "era": "Modern",
+      "nationality": "Russian",
+      "aliases": []
+    },
+    {
+      "id": "part",
+      "canonicalName": "Arvo Pärt",
+      "era": "Contemporary",
+      "nationality": "Estonian",
+      "aliases": []
+    },
+    {
+      "id": "glass",
+      "canonicalName": "Philip Glass",
+      "era": "Contemporary",
+      "nationality": "American",
+      "aliases": []
+    },
+    {
+      "id": "satie",
+      "canonicalName": "Erik Satie",
+      "era": "Modern",
+      "nationality": "French",
+      "aliases": []
+    },
+    {
+      "id": "zhangzhao",
+      "canonicalName": "Zhang Zhao",
+      "aliases": []
+    },
+    {
+      "id": "hensel",
+      "canonicalName": "Fanny Hensel",
+      "aliases": [
+        "Fanny Mendelssohn"
+      ]
     }
-   ]
-  },
-  {
-   "id": "p022",
-   "composerId": "prokofiev",
-   "title": "Visions fugitives No. 15",
-   "catalogue": "Op. 22",
-   "tier": 2,
-   "durationMin": 0.9,
-   "contentMin": 0.9,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "spiky"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p023",
-   "composerId": "prokofiev",
-   "title": "Visions fugitives No. 10 (Ridicolosamente)",
-   "catalogue": "Op. 22",
-   "tier": 2,
-   "durationMin": 1.0,
-   "contentMin": 1.0,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "grotesque"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p024",
-   "composerId": "prokofiev",
-   "title": "Visions fugitives No. 1",
-   "catalogue": "Op. 22",
-   "tier": 2,
-   "durationMin": 1.0,
-   "contentMin": 1.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "wistful"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p025",
-   "composerId": "scriabin",
-   "title": "Prelude in E-flat minor",
-   "catalogue": "Op. 16 No. 4",
-   "tier": 2,
-   "durationMin": 1.5,
-   "contentMin": 1.5,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "yearning"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p026",
-   "composerId": "faure",
-   "title": "Romance sans paroles",
-   "catalogue": "Op. 17 No. 3",
-   "tier": 2,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "gentle"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p027",
-   "composerId": "mendelssohn",
-   "title": "Venetian Gondola Song",
-   "catalogue": "Op. 30 No. 6",
-   "tier": 2,
-   "durationMin": 3.0,
-   "contentMin": 3.0,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "melancholy"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p028",
-   "composerId": "bach",
-   "title": "Prelude & Fugue in C minor",
-   "catalogue": "WTC I, BWV 847",
-   "tier": 2,
-   "durationMin": 3.5,
-   "contentMin": 3.5,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "driving"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p029",
-   "composerId": "grieg",
-   "title": "Notturno",
-   "catalogue": "Op. 54 No. 4",
-   "tier": 2,
-   "durationMin": 4.0,
-   "contentMin": 4.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "nocturnal"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p030",
-   "composerId": "gershwin",
-   "title": "Prelude No. 2",
-   "catalogue": "",
-   "tier": 2,
-   "durationMin": 4.0,
-   "contentMin": 4.0,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "bluesy"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p031",
-   "composerId": "still",
-   "title": "Summerland",
-   "catalogue": "Three Visions No. 2",
-   "tier": 2,
-   "durationMin": 4.0,
-   "contentMin": 4.0,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "iridescent"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p032",
-   "composerId": "tchaikovsky",
-   "title": "October (Autumn Song)",
-   "catalogue": "The Seasons Op. 37a",
-   "tier": 2,
-   "durationMin": 4.5,
-   "contentMin": 4.5,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "elegiac"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p033",
-   "composerId": "scarlatti",
-   "title": "Sonata in F minor",
-   "catalogue": "K. 466",
-   "tier": 2,
-   "durationMin": 4.5,
-   "contentMin": 3.0,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "plangent"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p034",
-   "composerId": "ravel",
-   "title": "Jeux d'eau",
-   "catalogue": "",
-   "tier": 2,
-   "durationMin": 5.5,
-   "contentMin": 5.5,
-   "fragility": 4.5,
-   "priorKnowledge": "played",
-   "tags": [
-    "fast",
-    "glittering"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p035",
-   "composerId": "schubert",
-   "title": "Impromptu in G-flat major",
-   "catalogue": "Op. 90 No. 3",
-   "tier": 2,
-   "durationMin": 6.0,
-   "contentMin": 6.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "flowing"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p036",
-   "composerId": "mozart",
-   "title": "Andante grazioso & variations",
-   "catalogue": "Sonata K. 331 i",
-   "tier": 2,
-   "durationMin": 6.0,
-   "contentMin": 6.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "varied",
-    "graceful"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p037",
-   "composerId": "bartok",
-   "title": "For Children No. 21: Allegro robusto",
-   "catalogue": "Sz. 42",
-   "tier": 3,
-   "durationMin": 1.0,
-   "contentMin": 1.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "fast",
-    "vigorous"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p038",
-   "composerId": "grieg",
-   "title": "Remembrances",
-   "catalogue": "Op. 71 No. 7",
-   "tier": 3,
-   "durationMin": 1.5,
-   "contentMin": 1.5,
-   "fragility": 1,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "waltzing"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p039",
-   "composerId": "villalobos",
-   "title": "O Polichinelo",
-   "catalogue": "Prole do bebê No. 1",
-   "tier": 3,
-   "durationMin": 1.5,
-   "contentMin": 1.5,
-   "fragility": 4,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "brilliant"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p040",
-   "composerId": "schubert",
-   "title": "Moment musical in F minor",
-   "catalogue": "Op. 94 No. 3",
-   "tier": 3,
-   "durationMin": 2.0,
-   "contentMin": 2.0,
-   "fragility": 1,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "dancing"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p041",
-   "composerId": "haydn",
-   "title": "Finale: Presto",
-   "catalogue": "Sonata Hob. XVI:37 iii",
-   "tier": 3,
-   "durationMin": 2.0,
-   "contentMin": 2.0,
-   "fragility": 3,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "witty"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p042",
-   "composerId": "cschumann",
-   "title": "Romance in F major",
-   "catalogue": "Op. 21 No. 2",
-   "tier": 3,
-   "durationMin": 2.0,
-   "contentMin": 2.0,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "warm"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p043",
-   "composerId": "chopin",
-   "title": "Mazurka in B major",
-   "catalogue": "Op. 63 No. 1",
-   "tier": 3,
-   "durationMin": 2.0,
-   "contentMin": 2.0,
-   "fragility": 3,
-   "priorKnowledge": "played",
-   "tags": [
-    "lively",
-    "dancing"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p044",
-   "composerId": "price",
-   "title": "Nimble Feet",
-   "catalogue": "Dances in the Canebrakes No. 1",
-   "tier": 3,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "jaunty"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p045",
-   "composerId": "scriabin",
-   "title": "Étude in D-sharp minor",
-   "catalogue": "Op. 8 No. 12",
-   "tier": 3,
-   "durationMin": 2.5,
-   "contentMin": 2.5,
-   "fragility": 5,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "tragic"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p046",
-   "composerId": "beethoven",
-   "title": "Bagatelle in G major",
-   "catalogue": "Op. 126 No. 1",
-   "tier": 3,
-   "durationMin": 3.0,
-   "contentMin": 3.0,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "genial"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p047",
-   "composerId": "granados",
-   "title": "Danza española No. 1 (Galante)",
-   "catalogue": "Op. 37",
-   "tier": 3,
-   "durationMin": 3.0,
-   "contentMin": 3.0,
-   "fragility": 2,
-   "priorKnowledge": "played",
-   "tags": [
-    "grand",
-    "stately"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p048",
-   "composerId": "mozart",
-   "title": "Rondo alla Turca",
-   "catalogue": "Sonata K. 331 iii",
-   "tier": 3,
-   "durationMin": 3.5,
-   "contentMin": 3.5,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "fast",
-    "brilliant"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p049",
-   "composerId": "brahms",
-   "title": "Rhapsody in G minor",
-   "catalogue": "Op. 79 No. 2",
-   "tier": 3,
-   "durationMin": 6.0,
-   "contentMin": 6.0,
-   "fragility": 4,
-   "priorKnowledge": "played",
-   "tags": [
-    "fast",
-    "turbulent"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p050",
-   "composerId": "faure",
-   "title": "Barcarolle No. 1 in A minor",
-   "catalogue": "Op. 26",
-   "tier": 3,
-   "durationMin": 6.0,
-   "contentMin": 6.0,
-   "fragility": 4,
-   "priorKnowledge": "new",
-   "tags": [
-    "moderate",
-    "undulating"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p051",
-   "composerId": "joplin",
-   "title": "Solace",
-   "catalogue": "",
-   "tier": 3,
-   "durationMin": 6.0,
-   "contentMin": 2.5,
-   "fragility": 2,
-   "priorKnowledge": "new",
-   "tags": [
-    "slow",
-    "swaying"
-   ],
-   "state": "backlog",
-   "sections": []
-  },
-  {
-   "id": "p052",
-   "composerId": "shostakovich",
-   "title": "Prelude & Fugue in E minor",
-   "catalogue": "Op. 87 No. 4",
-   "tier": 3,
-   "durationMin": 10.0,
-   "contentMin": 10.0,
-   "fragility": 4,
-   "priorKnowledge": "played",
-   "tags": [
-    "slow",
-    "then driving"
-   ],
-   "state": "backlog",
-   "sections": []
-  }
- ]
+  ],
+  "pieces": [
+    {
+      "id": "p001",
+      "composerId": "satie",
+      "title": "Gymnopédie No. 1",
+      "catalogue": "",
+      "tier": 0,
+      "durationMin": 3.5,
+      "contentMin": 3.5,
+      "fragility": 1,
+      "priorKnowledge": "near",
+      "tags": [
+        "slow",
+        "serene"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p002",
+      "composerId": "rschumann",
+      "title": "Von fremden Ländern und Menschen",
+      "catalogue": "Kinderszenen No. 1",
+      "tier": 0,
+      "durationMin": 2.0,
+      "contentMin": 2.0,
+      "fragility": 1,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "tender"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p003",
+      "composerId": "rschumann",
+      "title": "Träumerei",
+      "catalogue": "Kinderszenen No. 7",
+      "tier": 0,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "tender"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p004",
+      "composerId": "part",
+      "title": "Für Alina",
+      "catalogue": "",
+      "tier": 0,
+      "durationMin": 3.5,
+      "contentMin": 3.5,
+      "fragility": 1,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "still"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p005",
+      "composerId": "shostakovich",
+      "title": "Prelude in D major",
+      "catalogue": "Op. 87 No. 5",
+      "tier": 0,
+      "durationMin": 2.0,
+      "contentMin": 2.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "moderate",
+        "playful"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p006",
+      "composerId": "glass",
+      "title": "Opening",
+      "catalogue": "Glassworks",
+      "tier": 0,
+      "durationMin": 3.0,
+      "contentMin": 3.0,
+      "fragility": 1,
+      "priorKnowledge": "near",
+      "tags": [
+        "slow",
+        "hypnotic"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p007",
+      "composerId": "debussy",
+      "title": "La fille aux cheveux de lin",
+      "catalogue": "Préludes I No. 8",
+      "tier": 0,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "lyrical"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p008",
+      "composerId": "rachmaninoff",
+      "title": "Prelude in B major",
+      "catalogue": "Op. 32 No. 11",
+      "tier": 0,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 3,
+      "priorKnowledge": "played",
+      "tags": [
+        "moderate",
+        "lyrical"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p009",
+      "composerId": "beethoven",
+      "title": "Adagio cantabile",
+      "catalogue": "Pathétique Op. 13 ii",
+      "tier": 0,
+      "durationMin": 5.0,
+      "contentMin": 5.0,
+      "fragility": 2,
+      "priorKnowledge": "near",
+      "tags": [
+        "slow",
+        "songful"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p010",
+      "composerId": "beethoven",
+      "title": "Adagio sostenuto",
+      "catalogue": "Moonlight Op. 27 No. 2 i",
+      "tier": 0,
+      "durationMin": 5.5,
+      "contentMin": 5.5,
+      "fragility": 2,
+      "priorKnowledge": "near",
+      "tags": [
+        "slow",
+        "brooding"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p011",
+      "composerId": "debussy",
+      "title": "Clair de lune",
+      "catalogue": "Suite bergamasque iii",
+      "tier": 0,
+      "durationMin": 5.0,
+      "contentMin": 5.0,
+      "fragility": 3,
+      "priorKnowledge": "near",
+      "tags": [
+        "slow",
+        "luminous"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p012",
+      "composerId": "grieg",
+      "title": "Arietta",
+      "catalogue": "Op. 12 No. 1",
+      "tier": 1,
+      "durationMin": 1.5,
+      "contentMin": 1.5,
+      "fragility": 1,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "tender"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p013",
+      "composerId": "chopin",
+      "title": "Étude in C minor",
+      "catalogue": "Op. 25 No. 12",
+      "tier": 1,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 5,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "stormy"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p014",
+      "composerId": "cschumann",
+      "title": "Romance in E-flat minor",
+      "catalogue": "Op. 11 No. 1",
+      "tier": 1,
+      "durationMin": 3.5,
+      "contentMin": 3.5,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "dark"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p015",
+      "composerId": "liszt",
+      "title": "Consolation No. 3",
+      "catalogue": "S. 172",
+      "tier": 1,
+      "durationMin": 4.0,
+      "contentMin": 4.0,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "singing"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p016",
+      "composerId": "rachmaninoff",
+      "title": "Prelude in G minor",
+      "catalogue": "Op. 23 No. 5",
+      "tier": 1,
+      "durationMin": 4.0,
+      "contentMin": 4.0,
+      "fragility": 5,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "martial"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p017",
+      "composerId": "bach",
+      "title": "Aria",
+      "catalogue": "Goldberg Variations BWV 988",
+      "tier": 1,
+      "durationMin": 3,
+      "contentMin": 3,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "ornate"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p018",
+      "composerId": "mozart",
+      "title": "Fantasia in D minor",
+      "catalogue": "K. 397",
+      "tier": 1,
+      "durationMin": 5.0,
+      "contentMin": 5.0,
+      "fragility": 3,
+      "priorKnowledge": "played",
+      "tags": [
+        "varied",
+        "operatic"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p019",
+      "composerId": "brahms",
+      "title": "Intermezzo in A major",
+      "catalogue": "Op. 118 No. 2",
+      "tier": 1,
+      "durationMin": 5.5,
+      "contentMin": 5.5,
+      "fragility": 3,
+      "priorKnowledge": "near",
+      "tags": [
+        "slow",
+        "autumnal"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p020",
+      "composerId": "debussy",
+      "title": "La cathédrale engloutie",
+      "catalogue": "Préludes I No. 10",
+      "tier": 1,
+      "durationMin": 6.0,
+      "contentMin": 6.0,
+      "fragility": 4,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "monumental"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p021",
+      "composerId": "ravel",
+      "title": "Pavane pour une infante défunte",
+      "catalogue": "",
+      "tier": 1,
+      "durationMin": 6.0,
+      "contentMin": 6.0,
+      "fragility": 4,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "noble"
+      ],
+      "state": "backlog",
+      "sections": [
+        {
+          "id": "s1",
+          "label": "Final page",
+          "startBar": null,
+          "endBar": null,
+          "fragilityOverride": 5,
+          "lastColdCall": null,
+          "failCount": 0
+        }
+      ]
+    },
+    {
+      "id": "p022",
+      "composerId": "prokofiev",
+      "title": "Visions fugitives No. 15",
+      "catalogue": "Op. 22",
+      "tier": 2,
+      "durationMin": 1,
+      "contentMin": 1,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "spiky"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p023",
+      "composerId": "prokofiev",
+      "title": "Visions fugitives No. 10 (Ridicolosamente)",
+      "catalogue": "Op. 22",
+      "tier": 2,
+      "durationMin": 1.0,
+      "contentMin": 1.0,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "grotesque"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p024",
+      "composerId": "prokofiev",
+      "title": "Visions fugitives No. 1",
+      "catalogue": "Op. 22",
+      "tier": 2,
+      "durationMin": 1.0,
+      "contentMin": 1.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "wistful"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p025",
+      "composerId": "scriabin",
+      "title": "Prelude in E-flat minor",
+      "catalogue": "Op. 16 No. 4",
+      "tier": 2,
+      "durationMin": 1.5,
+      "contentMin": 1.5,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "yearning"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p026",
+      "composerId": "faure",
+      "title": "Romance sans paroles",
+      "catalogue": "Op. 17 No. 3",
+      "tier": 2,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "gentle"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p027",
+      "composerId": "mendelssohn",
+      "title": "Venetian Gondola Song",
+      "catalogue": "Op. 30 No. 6",
+      "tier": 2,
+      "durationMin": 3.0,
+      "contentMin": 3.0,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "melancholy"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p028",
+      "composerId": "bach",
+      "title": "Prelude & Fugue in C minor",
+      "catalogue": "WTC I, BWV 847",
+      "tier": 2,
+      "durationMin": 3.5,
+      "contentMin": 3.5,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "driving"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p029",
+      "composerId": "grieg",
+      "title": "Notturno",
+      "catalogue": "Op. 54 No. 4",
+      "tier": 2,
+      "durationMin": 4.0,
+      "contentMin": 4.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "nocturnal"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p030",
+      "composerId": "gershwin",
+      "title": "Prelude No. 2",
+      "catalogue": "",
+      "tier": 2,
+      "durationMin": 4.0,
+      "contentMin": 4.0,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "bluesy"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p031",
+      "composerId": "still",
+      "title": "Summerland",
+      "catalogue": "Three Visions No. 2",
+      "tier": 2,
+      "durationMin": 4.0,
+      "contentMin": 4.0,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "iridescent"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p032",
+      "composerId": "tchaikovsky",
+      "title": "October (Autumn Song)",
+      "catalogue": "The Seasons Op. 37a",
+      "tier": 2,
+      "durationMin": 4.5,
+      "contentMin": 4.5,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "elegiac"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p033",
+      "composerId": "scarlatti",
+      "title": "Sonata in F minor",
+      "catalogue": "K. 466",
+      "tier": 2,
+      "durationMin": 3,
+      "contentMin": 3,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "plangent"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p034",
+      "composerId": "ravel",
+      "title": "Jeux d'eau",
+      "catalogue": "",
+      "tier": 2,
+      "durationMin": 5.5,
+      "contentMin": 5.5,
+      "fragility": 4.5,
+      "priorKnowledge": "played",
+      "tags": [
+        "fast",
+        "glittering"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p035",
+      "composerId": "schubert",
+      "title": "Impromptu in G-flat major",
+      "catalogue": "Op. 90 No. 3",
+      "tier": 2,
+      "durationMin": 6.0,
+      "contentMin": 6.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "flowing"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p036",
+      "composerId": "mozart",
+      "title": "Andante grazioso & variations",
+      "catalogue": "Sonata K. 331 i",
+      "tier": 2,
+      "durationMin": 6.0,
+      "contentMin": 6.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "varied",
+        "graceful"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p037",
+      "composerId": "bartok",
+      "title": "For Children No. 21: Allegro robusto",
+      "catalogue": "Sz. 42",
+      "tier": 3,
+      "durationMin": 1.0,
+      "contentMin": 1.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "fast",
+        "vigorous"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p038",
+      "composerId": "grieg",
+      "title": "Remembrances",
+      "catalogue": "Op. 71 No. 7",
+      "tier": 3,
+      "durationMin": 1.5,
+      "contentMin": 1.5,
+      "fragility": 1,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "waltzing"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p039",
+      "composerId": "villalobos",
+      "title": "O Polichinelo",
+      "catalogue": "Prole do bebê No. 1",
+      "tier": 3,
+      "durationMin": 1.5,
+      "contentMin": 1.5,
+      "fragility": 4,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "brilliant"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p040",
+      "composerId": "schubert",
+      "title": "Moment musical in F minor",
+      "catalogue": "Op. 94 No. 3",
+      "tier": 3,
+      "durationMin": 2.0,
+      "contentMin": 2.0,
+      "fragility": 1,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "dancing"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p041",
+      "composerId": "haydn",
+      "title": "Finale: Presto",
+      "catalogue": "Sonata Hob. XVI:37 iii",
+      "tier": 3,
+      "durationMin": 2.0,
+      "contentMin": 2.0,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "witty"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p042",
+      "composerId": "cschumann",
+      "title": "Romance in F major",
+      "catalogue": "Op. 21 No. 2",
+      "tier": 3,
+      "durationMin": 2.0,
+      "contentMin": 2.0,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "warm"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p043",
+      "composerId": "chopin",
+      "title": "Mazurka in B major",
+      "catalogue": "Op. 63 No. 1",
+      "tier": 3,
+      "durationMin": 2.0,
+      "contentMin": 2.0,
+      "fragility": 3,
+      "priorKnowledge": "played",
+      "tags": [
+        "lively",
+        "dancing"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p044",
+      "composerId": "price",
+      "title": "Nimble Feet",
+      "catalogue": "Dances in the Canebrakes No. 1",
+      "tier": 3,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "jaunty"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p045",
+      "composerId": "scriabin",
+      "title": "Étude in D-sharp minor",
+      "catalogue": "Op. 8 No. 12",
+      "tier": 3,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 5,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "tragic"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p046",
+      "composerId": "beethoven",
+      "title": "Bagatelle in G major",
+      "catalogue": "Op. 126 No. 1",
+      "tier": 3,
+      "durationMin": 3.0,
+      "contentMin": 3.0,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "genial"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p047",
+      "composerId": "granados",
+      "title": "Danza española No. 1 (Galante)",
+      "catalogue": "Op. 37",
+      "tier": 3,
+      "durationMin": 3.0,
+      "contentMin": 3.0,
+      "fragility": 2,
+      "priorKnowledge": "played",
+      "tags": [
+        "grand",
+        "stately"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p048",
+      "composerId": "mozart",
+      "title": "Rondo alla Turca",
+      "catalogue": "Sonata K. 331 iii",
+      "tier": 3,
+      "durationMin": 3.5,
+      "contentMin": 3.5,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "fast",
+        "brilliant"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p049",
+      "composerId": "brahms",
+      "title": "Rhapsody in G minor",
+      "catalogue": "Op. 79 No. 2",
+      "tier": 3,
+      "durationMin": 6.0,
+      "contentMin": 6.0,
+      "fragility": 4,
+      "priorKnowledge": "played",
+      "tags": [
+        "fast",
+        "turbulent"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p050",
+      "composerId": "faure",
+      "title": "Barcarolle No. 1 in A minor",
+      "catalogue": "Op. 26",
+      "tier": 3,
+      "durationMin": 6.0,
+      "contentMin": 6.0,
+      "fragility": 4,
+      "priorKnowledge": "new",
+      "tags": [
+        "moderate",
+        "undulating"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p051",
+      "composerId": "joplin",
+      "title": "Solace",
+      "catalogue": "",
+      "tier": 3,
+      "durationMin": 2.5,
+      "contentMin": 2.5,
+      "fragility": 2,
+      "priorKnowledge": "new",
+      "tags": [
+        "slow",
+        "swaying"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p052",
+      "composerId": "shostakovich",
+      "title": "Prelude & Fugue in E minor",
+      "catalogue": "Op. 87 No. 4",
+      "tier": 3,
+      "durationMin": 10.0,
+      "contentMin": 10.0,
+      "fragility": 4,
+      "priorKnowledge": "played",
+      "tags": [
+        "slow",
+        "then driving"
+      ],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p053",
+      "composerId": "chopin",
+      "title": "Prelude in C major",
+      "catalogue": "Op. 28 No. 1",
+      "tier": 0,
+      "durationMin": 0.6,
+      "contentMin": 0.6,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p054",
+      "composerId": "chopin",
+      "title": "Prelude in A minor",
+      "catalogue": "Op. 28 No. 2",
+      "tier": 0,
+      "durationMin": 2,
+      "contentMin": 2,
+      "fragility": 1,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p055",
+      "composerId": "chopin",
+      "title": "Prelude in G major",
+      "catalogue": "Op. 28 No. 3",
+      "tier": 0,
+      "durationMin": 1,
+      "contentMin": 1,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p056",
+      "composerId": "chopin",
+      "title": "Prelude in E minor",
+      "catalogue": "Op. 28 No. 4",
+      "tier": 0,
+      "durationMin": 2,
+      "contentMin": 2,
+      "fragility": 1,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p057",
+      "composerId": "chopin",
+      "title": "Prelude in D major",
+      "catalogue": "Op. 28 No. 5",
+      "tier": 0,
+      "durationMin": 0.6,
+      "contentMin": 0.6,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p058",
+      "composerId": "chopin",
+      "title": "Prelude in B minor",
+      "catalogue": "Op. 28 No. 6",
+      "tier": 0,
+      "durationMin": 2,
+      "contentMin": 2,
+      "fragility": 1,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p059",
+      "composerId": "chopin",
+      "title": "Prelude in A major",
+      "catalogue": "Op. 28 No. 7",
+      "tier": 0,
+      "durationMin": 0.8,
+      "contentMin": 0.8,
+      "fragility": 1,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p060",
+      "composerId": "chopin",
+      "title": "Prelude in F♯ minor",
+      "catalogue": "Op. 28 No. 8",
+      "tier": 0,
+      "durationMin": 1.8,
+      "contentMin": 1.8,
+      "fragility": 4,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p061",
+      "composerId": "chopin",
+      "title": "Prelude in E major",
+      "catalogue": "Op. 28 No. 9",
+      "tier": 0,
+      "durationMin": 1.5,
+      "contentMin": 1.5,
+      "fragility": 1,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p062",
+      "composerId": "chopin",
+      "title": "Prelude in C♯ minor",
+      "catalogue": "Op. 28 No. 10",
+      "tier": 0,
+      "durationMin": 0.6,
+      "contentMin": 0.6,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p063",
+      "composerId": "chopin",
+      "title": "Prelude in B major",
+      "catalogue": "Op. 28 No. 11",
+      "tier": 0,
+      "durationMin": 0.7,
+      "contentMin": 0.7,
+      "fragility": 2,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p064",
+      "composerId": "chopin",
+      "title": "Prelude in G♯ minor",
+      "catalogue": "Op. 28 No. 12",
+      "tier": 0,
+      "durationMin": 1.3,
+      "contentMin": 1.3,
+      "fragility": 4,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p065",
+      "composerId": "chopin",
+      "title": "Prelude in F♯ major",
+      "catalogue": "Op. 28 No. 13",
+      "tier": 0,
+      "durationMin": 3,
+      "contentMin": 3,
+      "fragility": 2,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p066",
+      "composerId": "chopin",
+      "title": "Prelude in E♭ minor",
+      "catalogue": "Op. 28 No. 14",
+      "tier": 0,
+      "durationMin": 0.6,
+      "contentMin": 0.6,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p067",
+      "composerId": "chopin",
+      "title": "Prelude in D♭ major",
+      "catalogue": "Op. 28 No. 15",
+      "tier": 0,
+      "durationMin": 5.5,
+      "contentMin": 5.5,
+      "fragility": 2,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p068",
+      "composerId": "chopin",
+      "title": "Prelude in B♭ minor",
+      "catalogue": "Op. 28 No. 16",
+      "tier": 0,
+      "durationMin": 1.2,
+      "contentMin": 1.2,
+      "fragility": 5,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p069",
+      "composerId": "chopin",
+      "title": "Prelude in A♭ major",
+      "catalogue": "Op. 28 No. 17",
+      "tier": 0,
+      "durationMin": 3.2,
+      "contentMin": 3.2,
+      "fragility": 2,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p070",
+      "composerId": "chopin",
+      "title": "Prelude in F minor",
+      "catalogue": "Op. 28 No. 18",
+      "tier": 0,
+      "durationMin": 1,
+      "contentMin": 1,
+      "fragility": 4,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p071",
+      "composerId": "chopin",
+      "title": "Prelude in E♭ major",
+      "catalogue": "Op. 28 No. 19",
+      "tier": 0,
+      "durationMin": 1.4,
+      "contentMin": 1.4,
+      "fragility": 5,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p072",
+      "composerId": "chopin",
+      "title": "Prelude in C minor",
+      "catalogue": "Op. 28 No. 20",
+      "tier": 0,
+      "durationMin": 1.5,
+      "contentMin": 1.5,
+      "fragility": 1,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p073",
+      "composerId": "chopin",
+      "title": "Prelude in B♭ major",
+      "catalogue": "Op. 28 No. 21",
+      "tier": 0,
+      "durationMin": 1.8,
+      "contentMin": 1.8,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p074",
+      "composerId": "chopin",
+      "title": "Prelude in G minor",
+      "catalogue": "Op. 28 No. 22",
+      "tier": 0,
+      "durationMin": 0.8,
+      "contentMin": 0.8,
+      "fragility": 3,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p075",
+      "composerId": "chopin",
+      "title": "Prelude in F major",
+      "catalogue": "Op. 28 No. 23",
+      "tier": 0,
+      "durationMin": 0.9,
+      "contentMin": 0.9,
+      "fragility": 2,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p076",
+      "composerId": "chopin",
+      "title": "Prelude in D minor",
+      "catalogue": "Op. 28 No. 24",
+      "tier": 0,
+      "durationMin": 2.6,
+      "contentMin": 2.6,
+      "fragility": 5,
+      "state": "backlog",
+      "priorKnowledge": "new",
+      "tags": [],
+      "sections": []
+    },
+    {
+      "id": "p077",
+      "composerId": "zhangzhao",
+      "title": "Forest Meditation",
+      "catalogue": "",
+      "tier": 1,
+      "durationMin": 2,
+      "contentMin": 2,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p078",
+      "composerId": "hensel",
+      "title": "September",
+      "catalogue": "Das Jahr",
+      "tier": 2,
+      "durationMin": 3,
+      "contentMin": 3,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p079",
+      "composerId": "chopin",
+      "title": "Waltz in D-flat major",
+      "catalogue": "Op. 64 No. 1",
+      "tier": 3,
+      "durationMin": 2,
+      "contentMin": 2,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p080",
+      "composerId": "chopin",
+      "title": "Waltz in A-flat major",
+      "catalogue": "Op. 64 No. 3",
+      "tier": 3,
+      "durationMin": 3,
+      "contentMin": 3,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [],
+      "state": "backlog",
+      "sections": []
+    },
+    {
+      "id": "p081",
+      "composerId": "chopin",
+      "title": "Waltz in C-sharp minor",
+      "catalogue": "Op. 64 No. 2",
+      "tier": 3,
+      "durationMin": 3.5,
+      "contentMin": 3.5,
+      "fragility": 3,
+      "priorKnowledge": "new",
+      "tags": [],
+      "state": "backlog",
+      "sections": []
+    }
+  ]
 }

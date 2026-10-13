@@ -632,3 +632,13 @@ h1 {
 #save-status:not([hidden]) { position: sticky; top: 0; z-index: 1000; padding: 14px; background: #fff0d4; color: #482700; border-bottom: 2px solid #a86000; font-size: .9rem; }
 .learning-record textarea { min-height: 65px; }
 .summary-list .d { overflow-wrap: anywhere; }
+
+.session-pause { display:block; width:100%; margin:0 0 18px; text-align:center; }
+.day-plan h2 { margin:0 0 12px; font-size:1.1rem; }
+.day-plan ol { margin:0; padding-left:24px; }
+.day-plan li { padding:8px 0; border-top:1px solid var(--line); }
+.day-plan li:first-child { border:0; }
+.plan-item { display:block; width:100%; border:0; padding:4px; background:none; text-align:left; }
+.plan-title { display:block; font-weight:600; }
+.plan-meta { display:block; color:var(--muted); font-size:.85rem; margin-top:3px; }
+.plan-recorded .plan-title { color:var(--muted); }
