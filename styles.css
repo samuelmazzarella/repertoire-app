@@ -642,3 +642,13 @@ h1 {
 .plan-title { display:block; font-weight:600; }
 .plan-meta { display:block; color:var(--muted); font-size:.85rem; margin-top:3px; }
 .plan-recorded .plan-title { color:var(--muted); }
+
+/* Session planning and durable practice record. */
+.practice-log h2 { margin: 0; }
+.practice-log .row-between { gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.practice-log input[type="date"] { width: auto; max-width: 100%; font: inherit; padding: 6px; }
+.practice-log .summary-list .d { overflow-wrap: anywhere; }
+.warmup-preview { padding: 12px; border-left: 3px solid var(--accent, #a88553); }
+.session-options { gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+
+input[type="date"] { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; min-height: 44px; color-scheme: light dark; }

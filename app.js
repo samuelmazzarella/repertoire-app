@@ -26,7 +26,7 @@
     learningIntervalDays: 1,       // fixed cadence while learning
 
     // Repair
-    repairSessionsToExit: 3,       // consecutive Clean/Wobbled to leave repair
+    repairSessionsToExit: 3,       // clean checks on distinct days to leave repair
     repairIntervalFactor: 0.5,     // resume at this share of pre-failure interval
 
     // Session costing
@@ -64,7 +64,7 @@
   var CAPS = { 1: 20, 2: 16, 3: 14, 4: 11, 5: 8 };
 
   var STORAGE_KEY = 'repertoire.v1';
-  var STATE_VERSION = 2;
+  var STATE_VERSION = 3;
 
   var STATES = ['backlog', 'learning', 'consolidating', 'established', 'repair'];
   var SCHEDULED_STATES = ['learning', 'consolidating', 'established', 'repair'];
@@ -270,6 +270,7 @@
       durationMin: duration,
       contentMin: Math.max(0.1, num(raw.contentMin, duration)),
       fragility: clamp(num(raw.fragility, 3), 1, 5),
+      practiceDifficulty: clamp(num(raw.practiceDifficulty, num(raw.fragility, 3)), 1, 5),
       priorKnowledge: oneOf(raw.priorKnowledge, ['new', 'played', 'near'], 'new'),
       tags: Array.isArray(raw.tags) ? raw.tags.map(function (t) { return str(t); }).filter(Boolean) : [],
       notes: str(raw.notes),
@@ -326,7 +327,8 @@
       maxLearning: 2,
       lastSessionDate: null,
       lastExportDate: null,
-      onBreak: false,                                  // stored, unused until Phase 5
+      onBreak: false,
+      warmupMinutes: 2,
       capacityWatch: { overSince: null, nudgedFor: null }
     };
   }
@@ -355,6 +357,10 @@
          * reminder starts from first use rather than firing on day one. */
         lastExportDate: isoOrNull(s.lastExportDate),
         onBreak: s.onBreak === true,
+        breakSince: isoOrNull(s.breakSince),
+        breaks: Array.isArray(s.breaks) ? s.breaks.filter(function (b) { return isoOrNull(b.start); }) : [],
+        skippedDate: isoOrNull(s.skippedDate),
+        warmupMinutes: clamp(num(s.warmupMinutes, 2), 0, 5),
         capacityWatch: {
           overSince: isoOrNull(watch.overSince),
           nudgedFor: isoOrNull(watch.nudgedFor)
@@ -364,6 +370,7 @@
       composers: Array.isArray(raw.composers) ? raw.composers.map(normalizeComposer).filter(function (c) { return c.id; }) : [],
       pieces: Array.isArray(raw.pieces) ? raw.pieces.map(normalizePiece).filter(function (p) { return p.id; }) : [],
       session: raw.session && typeof raw.session === 'object' ? normalizeSession(raw.session) : null,
+      sessionArchive: Array.isArray(raw.sessionArchive) ? raw.sessionArchive.map(normalizeSession).filter(Boolean) : [],
       capacityLog: Array.isArray(raw.capacityLog) ? raw.capacityLog.slice(-TUNING.capacityLogDays) : []
     };
 
@@ -377,7 +384,8 @@
       return {
         pieceId: str(it.pieceId),
         sectionId: it.sectionId ? str(it.sectionId) : null,
-        kind: oneOf(it.kind, ['learning', 'maintenance', 'lookahead'], 'maintenance'),
+        kind: oneOf(it.kind, ['learning', 'maintenance', 'lookahead', 'continuity'], 'maintenance'),
+        title: str(it.title), composer: str(it.composer), sectionLabel: str(it.sectionLabel),
         estMin: num(it.estMin, 0)
       };
     }).filter(function (it) { return it.pieceId; });
@@ -393,6 +401,10 @@
     }
 
     return {
+      id: str(raw.id) || 'session-' + str(raw.date) + '-' + str(raw.startedAt),
+      mode: oneOf(raw.mode, ['normal', 'extra', 'manual'], 'normal'),
+      continued: raw.continued === true,
+      warmup: raw.warmup && typeof raw.warmup === 'object' ? raw.warmup : null,
       date: isoOrNull(raw.date),
       budgetMin: Math.max(0, num(raw.budgetMin, 0)),
       plan: plan,
@@ -819,7 +831,7 @@
 
   function learningCandidates(today) {
     return store.pieces
-      .filter(function (p) { return p.state === 'learning'; })
+      .filter(function (p) { return p.state === 'learning' && !reviewedOn(p, today); })
       .sort(function (a, b) { return priority(b, today) - priority(a, today) || cmpId(a, b); });
   }
 
@@ -827,7 +839,7 @@
 
   function duePool(today) {
     return reviewUnits()
-      .filter(function (p) { return MAINTENANCE_STATES.indexOf(p.state) >= 0 && isDue(p, today); })
+      .filter(function (p) { return MAINTENANCE_STATES.indexOf(p.state) >= 0 && isDue(p, today) && !reviewedOn(p, today); })
       .sort(function (a, b) {
         /* repair outranks everything, then priority, then longer pieces
          * first so ties never systematically favour the short ones. */
@@ -918,7 +930,7 @@
 
     return reviewUnits()
       .filter(function (p) {
-        if (p.sectionId) return false; // section probes are never rehearsed early
+        if (p.sectionId || reviewedOn(p, today)) return false; // no early section probes or repeated same-day reviews
         var lastReview = p.history[p.history.length - 1];
         if (lastReview && lastReview.early) return false; // allow a full interval after pulling forward
         if (p.state !== 'consolidating' && p.state !== 'established') return false;
@@ -942,10 +954,153 @@
       });
   }
 
-  /* Fits a session to `minutes`. Does not mutate state. */
-  function buildSession(minutes, today) {
+  function reviewedOn(subject, today) {
+    return (subject.history || []).some(function (h) { return h.date === today; });
+  }
+
+  function orderForWarmup(items) {
+    return items.sort(function (a,b) {
+      var ap = a.piece || pieceById(a.pieceId), bp = b.piece || pieceById(b.pieceId);
+      var d = (ap ? ap.practiceDifficulty : 3) - (bp ? bp.practiceDifficulty : 3);
+      if (d) return d;
+      if (a.pieceId === b.pieceId && !!a.sectionId !== !!b.sectionId) return a.sectionId ? -1 : 1;
+      return cmpId(ap || {id:a.pieceId}, bp || {id:b.pieceId});
+    });
+  }
+
+  function warmupForDate(today, minutes) {
+    var scales = ['C major','A harmonic minor','G major','E harmonic minor','D major','B harmonic minor',
+      'A major','F-sharp harmonic minor','E major','C-sharp harmonic minor','B major','G-sharp harmonic minor',
+      'F-sharp major','E-flat harmonic minor','D-flat major','B-flat harmonic minor','A-flat major','F harmonic minor',
+      'E-flat major','C harmonic minor','B-flat major','G harmonic minor','F major','D harmonic minor'];
+    var day = daysBetween('2026-10-14',today), scale = scales[((day % scales.length) + scales.length) % scales.length];
+    return {scale:scale, minutes:minutes, status:minutes > 0 ? 'pending' : 'skipped', date:today};
+  }
+
+  function markWarmup(done, today) {
+    var s = store.session;
+    if (!s || !s.warmup || s.warmup.status !== 'pending') return;
+    s.warmup.status = done ? 'done' : 'skipped'; s.warmup.date = today || todayISO();
+    if (done) { addActualMinutes(s.warmup.date, s.warmup.minutes); store.settings.lastSessionDate = s.warmup.date; }
+    save();
+  }
+
+  function archiveSession() {
+    var s = store.session;
+    if (!s) return;
+    var copy = JSON.parse(JSON.stringify(s));
+    copy.finished = true; copy.paused = false;
+    // Old snapshots cannot safely undo later sessions or manual corrections.
+    copy.results.forEach(function (r) { if (r) { delete r.snapshot; r.locked = true; } });
+    var at = store.sessionArchive.findIndex(function (x) { return x.id === copy.id; });
+    if (at >= 0) store.sessionArchive[at] = copy; else store.sessionArchive.push(copy);
+    store.session = null;
+  }
+
+  function planEntry(it) {
+    var p = it.piece || pieceById(it.pieceId), sec = p && it.sectionId ? sectionById(p,it.sectionId) : null;
+    return {pieceId:it.pieceId, sectionId:it.sectionId || null, kind:it.kind, estMin:it.estMin,
+      title:p ? p.title : it.title, composer:p ? composerName(p.composerId) : it.composer,
+      sectionLabel:sec ? sec.label : ''};
+  }
+
+  function createSession(built, today, mode) {
+    archiveSession();
+    store.session = {id:'session-' + Date.now() + '-' + Math.random().toString(36).slice(2,8),
+      date:today, budgetMin:built.budgetMin, plan:built.items.map(planEntry), index:0,
+      results:new Array(built.items.length), deferredCount:built.deferredCount || 0,
+      deferredMin:built.deferredMin || 0, startedAt:today, finished:false, paused:false,
+      learningDraft:null, mode:mode || 'normal', warmup:built.warmup || warmupForDate(today,0)};
+    store.settings.skippedDate = null;
+    logCapacity(built); save();
+  }
+
+  function unfinishedItems(old) {
+    if (!old || old.continued) return [];
+    return old.plan.filter(function (it,i) { return !old.results[i] || old.results[i].skipped; }).map(function (it) {
+      var p = pieceById(it.pieceId), sec = p && it.sectionId ? sectionById(p,it.sectionId) : null;
+      if (!p || !isScheduled(p) || (it.sectionId && (!sec || sec.enabled === false))) return null;
+      var subject = sec || p;
+      if ((subject.history || []).some(function (h) { return h.date && h.date >= old.date; })) return null;
+      return {pieceId:p.id,piece:p,sectionId:sec ? sec.id : null,kind:p.state === 'learning' ? 'learning' : 'maintenance',
+        estMin:p.state === 'learning' ? TUNING.learningSlotMin : pieceCost(subject)};
+    }).filter(Boolean);
+  }
+
+  function resumeClosed(id, today) {
     today = today || todayISO();
-    minutes = Math.max(0, num(minutes, 0));
+    var old = store.sessionArchive.find(function (s) { return s.id === id; });
+    var items = unfinishedItems(old);
+    if (!items.length) return false;
+    if (store.settings.onBreak) setBreak(false,today);
+    var total = items.reduce(function (n,it) { return n + it.estMin; },0);
+    createSession({items:orderForWarmup(items),budgetMin:total,plannedMin:total,demandMin:total},today,'normal');
+    if (old.learningDraft && items.some(function (it) { return it.pieceId === old.learningDraft.pieceId; })) store.session.learningDraft = old.learningDraft;
+    old.continued = true; save(); return true;
+  }
+
+  function startPieceSession(id, today) {
+    today = today || todayISO();
+    var p = pieceById(id);
+    if (!p || !isScheduled(p)) return false;
+    if (store.settings.onBreak) setBreak(false,today);
+    var it = {pieceId:p.id,piece:p,kind:p.state === 'learning' ? 'learning' : 'continuity',
+      estMin:p.state === 'learning' ? TUNING.learningSlotMin : pieceCost(p)};
+    createSession({items:[it],budgetMin:it.estMin,plannedMin:it.estMin,demandMin:it.estMin},today,'manual');
+    return true;
+  }
+
+  function practiceLog(date) {
+    date = date || todayISO();
+    var rows = [];
+    store.pieces.forEach(function (p) {
+      function collect(subject, sec) {
+        (subject.history || []).forEach(function (h) {
+          if (h.date !== date) return;
+          rows.push({pieceId:p.id,title:p.title,composer:composerName(p.composerId),section:sec ? sec.label : '',
+            grade:h.grade, type:h.type, detail:h.achievement || h.focus || h.note || '', date:h.date});
+        });
+      }
+      collect(p,null); p.sections.forEach(function (sec) { collect(sec,sec); });
+    });
+    store.sessionArchive.concat(store.session ? [store.session] : []).forEach(function (s) {
+      if (s.warmup && s.warmup.status === 'done' && s.warmup.date === date) {
+        rows.unshift({title:s.warmup.scale,composer:'Scale warmup',type:'warmup',detail:s.warmup.minutes + ' min',date:date});
+      }
+    });
+    return rows;
+  }
+
+  function saveLearningDraft(draft) {
+    if (!store.session) return;
+    store.session.learningDraft = draft; save();
+  }
+
+  function inBreak(date) {
+    var s = store.settings;
+    return (s.onBreak && s.breakSince && date >= s.breakSince) || s.breaks.some(function (b) { return date >= b.start && date < b.end; });
+  }
+
+  function setBreak(on, today) {
+    today = today || todayISO();
+    if (on === store.settings.onBreak) return;
+    if (on) { archiveSession(); store.settings.breakSince = today; }
+    else {
+      if (store.settings.breakSince) store.settings.breaks.push({start:store.settings.breakSince,end:today});
+      store.settings.breakSince = null; store.settings.skippedDate = null;
+      store.settings.capacityWatch = {overSince:null,nudgedFor:null};
+    }
+    store.settings.onBreak = on; save();
+  }
+
+  /* Fits a session to `minutes`. Does not mutate state. */
+  function buildSession(minutes, today, options) {
+    today = today || todayISO();
+    options = options || {};
+    var totalBudget = Math.max(0, num(minutes, 0));
+    var alreadyWarmedUp = options.extra && practiceLog(today).some(function (r) { return r.type === 'warmup'; });
+    var warmup = warmupForDate(today, alreadyWarmedUp ? 0 : Math.min(store.settings.warmupMinutes, totalBudget));
+    minutes = Math.max(0, totalBudget - warmup.minutes);
 
     var maxL = store.settings.maxLearning;
     var learners = learningCandidates(today);
@@ -959,7 +1114,7 @@
      * the budget, so an opportunistic Sunday session is judged against 30
      * minutes rather than against nothing. */
     var reference = budgetForDate(today) || store.settings.targetDailyMinutes;
-    var belowTarget = minutes < reference;
+    var belowTarget = totalBudget < reference;
     var slots = Math.min(learners.length, maxL);
     var yielded = 0;
     /* Only yield when there is maintenance to yield *to*. On a quiet day with
@@ -1016,7 +1171,7 @@
      * and by construction there is no budget left to do it with. Within that
      * constraint it now reaches past the 2-day window to relieve any day in
      * the next week already projected over its budget. */
-    if (!stoppedOnBudget && spent < minutes) {
+    if (!options.extra && !stoppedOnBudget && spent < minutes) {
       var pressure = forecastPressure(today);
       var ahead = lookaheadPool(today, pressure);
       for (var j = 0; j < ahead.length; j++) {
@@ -1036,6 +1191,18 @@
       }
     }
 
+    var continuityItems = [];
+    if (options.extra && !deferred.length && spent < minutes) {
+      var chosen = maintenanceItems.concat(learningItems).filter(function (it) { return !it.sectionId; }).map(function (it) { return it.pieceId; });
+      store.pieces.filter(function (p) {
+        return (p.state === 'established' || p.state === 'consolidating') && !reviewedOn(p, today) && chosen.indexOf(p.id) < 0;
+      }).sort(function (a,b) {
+        return String(a.lastPlayed || '').localeCompare(String(b.lastPlayed || '')) || cmpId(a,b);
+      }).forEach(function (p) {
+        var cost = p.durationMin * TUNING.maintenanceCostFactor;
+        if (spent + cost <= minutes) { var it = reviewItem(p, 'continuity'); it.estMin = cost; continuityItems.push(it); spent += cost; }
+      });
+    }
     var deferredMin = deferred.reduce(function (t, p) { return t + pieceCost(p); }, 0);
     /* Demand is what today asked for at full strength — the learning block
      * at its unyielded size, plus everything due. Yielding a slot reduces the
@@ -1044,18 +1211,18 @@
 
     return {
       date: today,
-      budgetMin: minutes,
+      budgetMin: totalBudget,
+      warmup: warmup,
+      continuity: continuityItems,
       referenceMin: reference,
       belowTarget: belowTarget,
       learning: learningItems,
       maintenance: maintenanceItems,
       lookahead: lookaheadItems,
-      /* Play order: maintenance, then anything pulled forward, then learning
-       * last. The learning block still gets its budget reserved up front —
-       * only the order changed — but putting it at the end means a session
-       * that has to be cut short drops learning rather than maintenance. */
-      items: maintenanceItems.filter(function (it) { return it.sectionId; }).concat(maintenanceItems.filter(function (it) { return !it.sectionId; }), lookaheadItems, learningItems),
-      plannedMin: spent,
+      /* Select by urgency, then play from easier to harder. Keep section
+       * checks ahead of the same whole piece, before it primes recall. */
+      items: orderForWarmup(maintenanceItems.concat(lookaheadItems, learningItems, continuityItems)),
+      plannedMin: spent + warmup.minutes,
       demandMin: fullLearning + dueCost,
       maintenanceDemandMin: dueCost,
       learningDemandMin: fullLearning,
@@ -1106,26 +1273,11 @@
    * the plan lives in state and a reopened app resumes where it left off.
    * ------------------------------------------------------------------ */
 
-  function startSession(minutes, today) {
+  function startSession(minutes, today, options) {
     today = today || todayISO();
-    var built = buildSession(minutes, today);
-    var plan = built.items.map(function (it) {
-      return { pieceId: it.pieceId, sectionId: it.sectionId || null, kind: it.kind, estMin: it.estMin };
-    });
-    store.session = {
-      date: today,
-      budgetMin: built.budgetMin,
-      plan: plan,
-      index: 0,
-      results: new Array(plan.length),
-      deferredCount: built.deferredCount,
-      deferredMin: built.deferredMin,
-      startedAt: today,
-      finished: false, paused: false, learningDraft: null
-    };
-    store.settings.lastSessionDate = today;
-    logCapacity(built);
-    save();
+    if (store.settings.onBreak) return null;
+    var built = buildSession(minutes, today, options);
+    createSession(built,today,options && options.extra ? 'extra' : 'normal');
     return built;
   }
 
@@ -1190,7 +1342,7 @@
     var s = store.session;
     if (!s) return false;
     var r = s.results[i];
-    if (!r) return false;
+    if (!r || r.locked) return false;
     var p = pieceById(r.pieceId);
     if (p) { var target = r.sectionId ? sectionById(p, r.sectionId) : p; if (target) restorePiece(target, r.snapshot); }
     if (!r.skipped) addActualMinutes(r.date || s.date, -num(r.countedMin, 0));
@@ -1205,6 +1357,7 @@
     var it = itemAt(i);
     if (!it) return null;
 
+    if (s.results[i] && s.results[i].locked) return null;
     clearResultAt(i);                       // re-recording never stacks
     var p = it.piece;
     var snap = snapshotPiece(it.subject);
@@ -1240,6 +1393,7 @@
       result.countedMin = it.estMin;
     }
 
+    if (!payload.skip) store.settings.lastSessionDate = s.date;
     if (result.countedMin) addActualMinutes(s.date, result.countedMin);
     s.results[i] = result;
     save();
@@ -1339,14 +1493,13 @@
     save(); return s;
   }
 
-  /* The user may end a session early — with learning last, that is the
-   * intended way to drop it when time runs out. */
+  /* Closing a session preserves recorded work and unfinished items. */
   function finishSession() {
     var s = store.session;
     if (!s) return;
     s.finished = true; s.paused = false;
     s.index = s.plan.length;
-    save();
+    archiveSession(); save();
   }
 
   /* Keeps a running session honest after the piece is edited mid-play. */
@@ -1398,14 +1551,14 @@
   }
 
   function endSession() {
-    store.session = null;
+    archiveSession();
     save();
   }
 
   /* Not a penalty. Records that today was addressed and closes. */
   function skipToday(today) {
-    store.settings.lastSessionDate = today || todayISO();
-    store.session = null;
+    store.settings.skippedDate = today || todayISO();
+    archiveSession();
     save();
   }
 
@@ -1427,7 +1580,7 @@
 
     var missed = 0;
     for (var i = 1; i <= calendar; i++) {
-      if (budgetForDate(addDays(last, i)) > 0) missed++;
+      if (budgetForDate(addDays(last, i)) > 0 && !inBreak(addDays(last,i))) missed++;
     }
     if (missed < TUNING.gapThresholdDays) {
       return { show: false, missedDays: missed, calendarDays: calendar, pieces: [] };
@@ -1499,9 +1652,9 @@
     var existing = logEntryFor(built.date);
     var entry = {
       date: built.date,
-      budget: built.budgetMin,
-      demand: built.demandMin,
-      planned: built.plannedMin,
+      budget: built.budgetMin + (existing ? num(existing.budget,0) : 0),
+      demand: Math.max(built.demandMin || 0, existing ? num(existing.demand,0) : 0),
+      planned: built.plannedMin + (existing ? num(existing.planned,0) : 0),
       actualMin: existing ? num(existing.actualMin, 0) : 0,   // survives a rebuild
       deferredCount: built.deferredCount,
       deferredMin: built.deferredMin
@@ -2021,6 +2174,7 @@
     ['composerId', 'title', 'catalogue', 'notes', 'priorKnowledge', 'learningFocus', 'learningAchievement'].forEach(function (k) {
       if (fields[k] != null) p[k] = str(fields[k]);
     });
+    if (fields.practiceDifficulty != null) p.practiceDifficulty = clamp(num(fields.practiceDifficulty,3),1,5);
     if (fields.tier != null) p.tier = clamp(Math.round(num(fields.tier, p.tier)), 0, 3);
     if (fields.durationMin != null) p.durationMin = Math.max(0.1, num(fields.durationMin, p.durationMin));
     if (fields.contentMin != null) p.contentMin = Math.max(0.1, num(fields.contentMin, p.contentMin));
@@ -2047,6 +2201,11 @@
     if (p.state === 'consolidating' && fields.consolidatingIntervalDays != null) {
       p.intervalDays = p.consolidatingIntervalDays; p.nextDue = addDays(p.lastPlayed || today, p.intervalDays);
     }
+    if (store.session && store.session.learningDraft && store.session.learningDraft.pieceId === id && fields.learningFocus != null) store.session.learningDraft.focus = p.learningFocus;
+    if (store.session) store.session.results.forEach(function (r) { if (r && r.pieceId === id) r.locked = true; });
+    if (store.session) store.session.plan.forEach(function (it,i) { if (it.pieceId === id && !store.session.results[i]) {
+      it.kind = p.state === 'learning' ? 'learning' : it.kind === 'learning' ? 'maintenance' : it.kind;
+    }});
     if (fragilityChanged) { reclampInterval(p, today); prepareSections(p, today); }
     save();
     return p;
@@ -2086,13 +2245,15 @@
     prepareSections(p, today || todayISO());
     var session = store.session;
     if (session) {
+      var current = session.plan[session.index];
       var plan = [], results = [];
       session.plan.forEach(function (it, i) {
         if (it.pieceId === pieceId && it.sectionId && !sectionById(p, it.sectionId)) return;
         plan.push(it); results.push(session.results[i] || null);
       });
       session.plan = plan; session.results = results;
-      session.index = session.finished ? plan.length : results.findIndex(function (r) { return !r; });
+      session.index = session.finished ? plan.length : plan.indexOf(current);
+      if (session.index < 0) session.index = results.findIndex(function (r) { return !r; });
       if (session.index < 0) session.index = plan.length;
     }
     save(); return p.sections;
@@ -2225,6 +2386,39 @@
     return true;
   }
 
+  function correctPreludeStates() {
+    var id = 'preludes-status-20261014';
+    if (store.appliedUpdates.indexOf(id) >= 0) return false;
+    var pieces = store.pieces.filter(function (p) { return p.composerId === 'chopin' && /^Op\. 28 No\. \d+$/.test(p.catalogue); });
+    if (!pieces.some(function (p) { return p.lastPlayed || p.history.length; })) return false;
+    archiveSession();
+    pieces.forEach(function (p) {
+      if (p.lastPlayed && p.lastPlayed > '2026-10-14') return; // preserve evidence recorded after this correction was requested
+      var n = +p.catalogue.split('No. ')[1];
+      if ([4,6,7].indexOf(n) >= 0) p.practiceDifficulty = 1;
+      if (n === 13) p.practiceDifficulty = 2;
+      if ([4,6,7,13].indexOf(n) >= 0) {
+        setPieceState(p,'consolidating','2026-10-14'); p.consolidatingIntervalDays = 1; p.intervalDays = 1;
+      } else if (n !== 16) {
+        var was = p.state; setPieceState(p,'established','2026-10-14');
+        p.intervalDays = clampInterval(was === 'established' ? p.intervalDays || 3 : Math.max(3,p.intervalDays || 3),p.fragility);
+        p.repairSessions = 0; p.preRepairInterval = null;
+      } else if (p.state !== 'repair') {
+        p.preRepairInterval = p.intervalDays || 3; p.repairSessions = 0;
+        setPieceState(p,'repair','2026-10-14'); p.intervalDays = 1;
+      }
+      if (n !== 16) p.focusedMinutes = null;
+      p.nextDue = p.lastPlayed ? addDays(p.lastPlayed,p.intervalDays) : '2026-10-14';
+      var obsolete = ['Not yet started','Currently learning (~1/3 complete)',
+        'Focused practice after the break. Allow five minutes; return to normal maintenance when ready.'];
+      p.notes = p.notes.split('\n').filter(function (line) { return obsolete.indexOf(line.trim()) < 0; }).join('\n');
+      var examples = ['Bars 17–24, hands together','From memory at 80 bpm; transition still uncertain','Join bars 24–25 without stopping'];
+      if (examples.indexOf(p.learningFocus) >= 0) p.learningFocus = '';
+      if (examples.indexOf(p.learningAchievement) >= 0) p.learningAchievement = '';
+    });
+    store.appliedUpdates.push(id); save(); return true;
+  }
+
   function needsSeed() { return store.pieces.length === 0 && store.composers.length === 0; }
 
   function bootstrapFromSeed(json, today) {
@@ -2257,11 +2451,11 @@
     var dropped = false;
     if (store.session && store.session.date !== today) {
       if (!store.session.finished) store.session.paused = true;
-      else store.session = null;
+      else archiveSession();
       dropped = true;
     }
 
-    var nudge = capacityNudge(today);     // mutates capacityWatch
+    var nudge = store.settings.onBreak ? null : capacityNudge(today);     // mutates capacityWatch
     if (nudge || dropped) save();
 
     return {
@@ -2273,7 +2467,7 @@
       ideal: idealMinutes(today),
       forecast: loadForecast(today, TUNING.forecastDays),
       counts: counts(today),
-      gap: gapReport(today),
+      gap: store.settings.onBreak ? {show:false,missedDays:0,calendarDays:0,pieces:[]} : gapReport(today),
       capacity: capacityReport(today),
       nudge: nudge,
       exportReminder: needsExportReminder(today) ? { days: daysSinceExport(today) } : null,
@@ -2288,7 +2482,7 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '5.2',
+    VERSION: '6.0',
     TUNING: TUNING,
     CAPS: CAPS,
     STORAGE_KEY: STORAGE_KEY,
@@ -2327,6 +2521,8 @@
           else if (fields.dailyOverrides[d] != null) s.dailyOverrides[d] = Math.max(0, Math.round(num(fields.dailyOverrides[d], 0)));
         }
       }
+      if (fields.warmupMinutes != null) s.warmupMinutes = clamp(num(fields.warmupMinutes,2),0,5);
+      if (fields.skippedDate === null) s.skippedDate = null;
       if (fields.maxLearning != null) s.maxLearning = Math.max(0, Math.round(num(fields.maxLearning, s.maxLearning)));
       if (fields.onBreak != null) s.onBreak = fields.onBreak === true;
       save();
@@ -2417,6 +2613,16 @@
 
     // seed / launch
     correctCatalogue: correctCatalogue,
+    correctPreludeStates: correctPreludeStates,
+    practiceLog: practiceLog,
+    markWarmup: markWarmup,
+    resumeClosed: resumeClosed,
+    unfinishedItems: unfinishedItems,
+    startPieceSession: startPieceSession,
+    saveLearningDraft: saveLearningDraft,
+    setBreak: setBreak,
+    inBreak: inBreak,
+    warmupForDate: warmupForDate,
     needsSeed: needsSeed,
     bootstrapFromSeed: bootstrapFromSeed,
     launch: launch

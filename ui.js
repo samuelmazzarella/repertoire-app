@@ -8,6 +8,8 @@
   /* View state only — nothing here is persisted. */
   var view = {
     tab: 'today',
+    extra: false,
+    logDate: null,
     minutes: null,          // current stepper value
     dismissedGap: false,
     dismissedNudge: false,
@@ -103,6 +105,7 @@
 
   function start() {
     A.correctCatalogue();
+    A.correctPreludeStates();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -145,20 +148,28 @@
 
     var session = s.session;
     if (session && session.paused) { renderPaused(root, session, today); return; }
-    if (session && session.index < session.plan.length) { renderSession(root, session, today); return; }
+    if (session && ((session.warmup && session.warmup.status === 'pending') || session.index < session.plan.length)) { renderSession(root, session, today); return; }
     if (session) { renderSummary(root, today); return; }
     renderLaunch(root, today);
   }
 
   function renderLaunch(root, today) {
     var c = launchInfo.counts;
-    var built = A.buildSession(view.minutes, today);
+    var built = A.buildSession(view.minutes, today, {extra:view.extra});
     var html = '';
 
     html += '<h1>Today</h1>';
     html += '<p class="date-line">' + esc(longDate(today)) + '</p>';
 
     html += renderNotices(today);
+    html += renderPracticeLog(today);
+    html += renderSavedPlans(today);
+    if (A.state().settings.onBreak) {
+      root.innerHTML = html + '<section class="card"><h2>Taking a break</h2><p>No piano or no time: your records are saved. Review dates keep their meaning; missed days are not failures.</p><button class="btn btn-primary btn-block" data-action="end-break">I’m ready to practise</button></section>'; return;
+    }
+    if (A.state().settings.skippedDate === today) {
+      root.innerHTML = html + '<section class="card"><h2>Taking today off</h2><p>Your pieces stay on their existing schedules.</p><button class="btn btn-block" data-action="unskip-day">I have time after all</button></section>'; return;
+    }
 
     if (c.total === 0) {
       root.innerHTML = html + '<div class="empty-state"><h2>No repertoire yet</h2>' +
@@ -172,7 +183,7 @@
     /* Nothing scheduled but a full backlog is the first-run state, and a
        Start button that builds an empty session is no help. Route straight
        into choosing something to learn. */
-    if (nothingToDo && c.learning === 0 && c.backlog > 0) {
+    if (nothingToDo && c.learning === 0 && c.backlog === c.total) {
       html += '<section class="card"><p class="headline" style="font-size:1.5rem">Nothing scheduled yet</p>' +
         '<p class="ideal-line">' + plural(c.backlog, 'piece') + ' waiting in the backlog. ' +
         'Pick one to start learning — it will take a 10-minute slot each session.</p>' +
@@ -185,6 +196,7 @@
     }
 
     html += '<section class="card">';
+    html += '<h2>' + (view.extra ? 'Extra practice' : 'Plan a session') + '</h2>';
 
     if (launchInfo.zeroBudgetDay) {
       html += '<p class="headline" style="font-size:1.35rem">No session scheduled</p>';
@@ -215,7 +227,9 @@
       '<button class="btn" data-action="more" aria-label="More time">+</button>' +
       '</div>';
 
+    html += '<label class="check-label"><input type="checkbox" id="extra-mode"' + (view.extra ? ' checked' : '') + '> Include optional full play-throughs</label><p class="tiny muted">Due work comes first. Spare time goes to learned pieces you have not played through today.</p>';
     html += '<p class="plan-preview">' + planPreview(built) + '</p>';
+    html += warmupPreview(built.warmup);
 
     html += '<div class="stack" style="margin-top:16px">' +
       '<button class="btn btn-primary btn-block" data-action="start">Start</button>' +
@@ -225,10 +239,53 @@
 
     html += '</section>';
 
+    html += '<div class="row-between session-options"><button class="btn btn-quiet" data-action="start-break">No piano / take a break</button><button class="btn btn-quiet" data-action="practice-settings">Practice settings</button></div>';
     html += renderPlan(built.items, null);
     html += renderForecast(launchInfo.forecast, today);
 
     root.innerHTML = html;
+  }
+
+  function warmupPreview(w) {
+    return w && w.minutes ? '<p class="warmup-preview"><b>Start with ' + esc(w.scale) + '</b> · ' + mins(w.minutes) + ' min warmup, included in your time.</p>' : '';
+  }
+
+  function renderPracticeLog(today) {
+    var date = view.logDate || today, rows = A.practiceLog(date);
+    var html = '<section class="card practice-log"><div class="row-between"><h2>' + (date === today ? 'Practised today' : 'Practice record') + '</h2>' +
+      '<input aria-label="Practice record date" type="date" id="log-date" value="' + esc(date) + '" max="' + today + '"></div>';
+    if (!rows.length) html += '<p class="small muted">No practice recorded for this date.</p>';
+    else {
+      html += '<ul class="summary-list">';
+      rows.forEach(function (r) {
+        var result = r.type === 'warmup' ? 'Warmup' : r.grade === 'clean' ? 'Clean' : r.grade === 'wobbled' ? 'Wobbled' : r.grade === 'broke' ? 'Broke down' : 'Recorded';
+        html += '<li><span class="g">' + result + '</span><span class="t">' + esc(r.title + (r.section ? ' — ' + r.section : '')) +
+          '<span class="plan-meta">' + esc(r.composer) + '</span></span><span class="d">' + esc(r.detail) + '</span></li>';
+      });
+      html += '</ul>';
+    }
+    if (date !== today) html += '<button class="btn btn-sm btn-quiet" data-action="log-today">Back to today’s record</button>';
+    return html + '</section>';
+  }
+
+  function renderSavedPlans(today) {
+    var date = view.logDate || today;
+    var saved = A.state().sessionArchive.filter(function (s) { return s.date === date && A.unfinishedItems(s).length; });
+    if (!saved.length) return '';
+    return '<details class="card"><summary>Unfinished plans (' + saved.length + ')</summary>' + saved.map(function (s) {
+      var remaining = A.unfinishedItems(s).length;
+      return '<p class="small">' + remaining + ' items left from a closed session.</p><button class="btn btn-block" data-action="resume-closed" data-id="' + esc(s.id) + '">Continue unfinished items</button>';
+    }).join('') + '</details>';
+  }
+
+  function openSettings() {
+    var settings = A.state().settings;
+    var html = '<h2>Practice settings</h2><p class="small muted">Your usual week. You can still practise on a zero-minute day or change the time for any session.</p>';
+    DAYS.forEach(function (day,i) { html += '<div class="field"><label for="budget-' + i + '">' + esc(day) + ' (minutes)</label><input id="budget-' + i + '" type="number" min="0" max="600" value="' + A.budgetForWeekday(i) + '"></div>'; });
+    html += '<div class="field"><label for="warmup-minutes">Scale warmup (minutes; 0 to turn off)</label><input id="warmup-minutes" type="number" min="0" max="5" value="' + settings.warmupMinutes + '"></div>' +
+      '<div class="field"><label for="max-learning">Learning pieces per session</label><input id="max-learning" type="number" min="0" max="20" value="' + settings.maxLearning + '"></div>' +
+      '<button class="btn btn-primary btn-block" data-action="save-settings">Save settings</button><button class="btn btn-quiet btn-block" data-action="close-sheet">Cancel</button>';
+    openSheet(html);
   }
 
   function renderPlan(items, session) {
@@ -241,7 +298,7 @@
       var sec = entry.sectionId && p.sections.find(function (x) { return x.id === entry.sectionId; });
       var r = session && session.results[i];
       var status = !r ? 'To do' : r.skipped ? 'Skipped' : r.learning ? 'Recorded' : (r.grade === 'broke' ? 'Broke down' : r.grade === 'clean' ? 'Clean' : 'Wobbled');
-      var label = sec ? sec.label : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
+      var label = sec ? sec.label : entry.kind === 'continuity' ? 'Full play-through' : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
       html += '<li class="' + (r ? 'plan-recorded' : '') + '">' +
         (session ? '<button class="plan-item" data-action="resume-item" data-index="' + i + '">' : '<div class="plan-item">') +
         '<span class="plan-title">' + esc(p.title) + '</span><span class="plan-meta">' +
@@ -261,15 +318,18 @@
       (session.date !== today ? '<p class="small muted">Continuing the plan from ' + esc(longDate(session.date)) + '.</p>' : '') +
       '<button class="btn btn-primary btn-block" data-action="resume-paused">Resume session</button>' +
       '<button class="btn btn-quiet btn-block" data-action="finish-session">Finish for now</button></section>' +
-      renderPlan(session.plan, session);
+      '<button class="btn btn-block btn-quiet" data-action="replan">Plan a different session</button>' +
+      '<button class="btn btn-block btn-quiet" data-action="start-break">No piano / take a break</button>' +
+      renderPlan(session.plan, session) + renderPracticeLog(today);
   }
 
+  function captureLearningDraft() {
+    var it = A.currentItem();
+    if (it && el('learning-focus')) A.saveLearningDraft({pieceId:it.piece.id,focus:el('learning-focus').value,
+      achievement:el('learning-achievement').value,nextFocus:el('learning-next').value});
+  }
   function pauseWithDraft() {
-    var it = A.currentItem(), draft = null;
-    if (it && el('learning-focus')) draft = {pieceId:it.piece.id, focus:el('learning-focus').value,
-      achievement:el('learning-achievement').value, nextFocus:el('learning-next').value};
-    A.pauseSession(draft);
-    refresh(); window.scrollTo(0,0);
+    captureLearningDraft(); A.pauseSession(); refresh(); window.scrollTo(0,0);
   }
 
   function nextDueSummary(today) {
@@ -287,8 +347,9 @@
     var parts = [];
     if (b.learning.length) parts.push(plural(b.learning.length, 'learning piece'));
     if (b.maintenance.length) parts.push(b.maintenance.length + ' maintenance');
+    if (b.continuity && b.continuity.length) parts.push(plural(b.continuity.length, 'full play-through'));
     if (b.lookahead.length) parts.push(b.lookahead.length + ' pulled forward');
-    if (!parts.length) return 'Nothing fits in ' + b.budgetMin + ' minutes.';
+    if (!parts.length) return b.warmup && b.warmup.minutes ? 'Scale warmup only; no pieces fit or need another review.' : 'No pieces fit or need another review.';
 
     var out = parts.join(' · ') + ' — about ' + mins(b.plannedMin) + ' min.';
 
@@ -376,6 +437,15 @@
   /* ---------- running a session ---------- */
 
   function renderSession(root, session, today) {
+    if (session.warmup && session.warmup.status === 'pending') {
+      root.innerHTML = '<h1>Warm up</h1><section class="card"><h2>' + esc(session.warmup.scale) + '</h2>' +
+        '<p>About ' + mins(session.warmup.minutes) + ' minutes. One or two octaves, hands separately or together, at a comfortable tempo.</p>' +
+        '<p class="small muted">A general scale suggestion, not a passage from a piece.</p>' +
+        '<button class="btn btn-primary btn-block" data-action="warmup-done">Done — start pieces</button>' +
+        '<button class="btn btn-quiet btn-block" data-action="warmup-skip">Skip warmup</button>' +
+        '<button class="btn btn-quiet btn-block" data-action="pause-session">Pause &amp; view plan</button></section>' + renderPlan(session.plan,null);
+      return;
+    }
     var it = A.currentItem();
     if (!it) { renderSummary(root, today); return; }
 
@@ -384,7 +454,7 @@
     var sec = it.section;
     var isLearning = it.kind === 'learning' || p.state === 'learning';
     var kindLabel = sec ? 'Section check' : isLearning ? 'Learning' :
-      it.kind === 'lookahead' ? 'Pulled forward' : 'Maintenance';
+      it.kind === 'continuity' ? 'Full play-through' : it.kind === 'lookahead' ? 'Pulled forward' : 'Maintenance';
     var prog = A.sessionProgress();
 
     /* Progress strip doubles as navigation — tap any segment to jump. */
@@ -423,11 +493,13 @@
         '<p class="small muted">Check this section before rehearsing it. This result changes only its own schedule.</p>' +
         (sec.notes ? '<p>' + esc(sec.notes) + '</p>' : '') + '</div>';
     } else if (!isLearning) {
-      html += '<p class="small muted">' + (p.state === 'repair' ? 'Repair the parts that need work. Grade the first attempt you use to check recall.' :
+      html += '<p class="small muted">' + (it.kind === 'continuity' ? 'Play the whole piece from memory for continuity. Grade the first run; an early Clean result will not lengthen its interval.' : p.state === 'repair' ? 'Repair the parts that need work. Grade the first attempt you use to check recall.' :
         p.state === 'consolidating' && p.focusedMinutes ? 'Use this slot for focused practice. Grade the first attempt you use to check recall.' :
         'Whole-piece review. Grade your first attempt from memory, before practising this piece.') + '</p>';
     }
+    if (!isLearning && p.learningFocus) html += '<p class="np-notes"><b>Your practice focus:</b> ' + esc(p.learningFocus) + '</p>';
     if (p.notes) html += '<div class="np-notes">' + esc(p.notes) + '</div>';
+    html += '<button class="btn btn-sm btn-quiet" data-action="edit-practice-notes" data-id="' + esc(p.id) + '" data-section-id="' + esc(sec ? sec.id : '') + '">Edit notes and sections</button>';
     html += '</div>';
 
     if (it.result) {
@@ -436,7 +508,11 @@
           : it.result.learning ? 'Practice recorded'
           : it.result.pct != null ? 'Learning recorded'
           : 'Recorded ' + esc(it.result.grade)) +
-        ' · <button class="btn btn-sm btn-quiet" data-action="undo-item">Undo</button></p>';
+        (it.result.locked ? ' · saved record' : ' · <button class="btn btn-sm btn-quiet" data-action="undo-item">Undo</button>') + '</p>';
+    }
+
+    if (it.result && it.result.locked) {
+      root.innerHTML = html + '<p class="small muted">This result is kept as recorded because the piece was edited afterwards.</p><button class="btn btn-block" data-action="pause-session">Back to plan</button></div>'; return;
     }
 
     if (isLearning) {
@@ -480,13 +556,13 @@
     if (!draft || draft.pieceId !== p.id) draft = null;
     return '<div class="learning-record">' +
       '<div class="field"><label for="learning-focus">Today’s focus</label>' +
-      '<textarea id="learning-focus" placeholder="Bars 17–24, hands together">' + esc(draft ? draft.focus : p.learningFocus) + '</textarea></div>' +
+      '<textarea id="learning-focus" placeholder="Optional — your own practice focus">' + esc(draft ? draft.focus : p.learningFocus) + '</textarea></div>' +
       (last ? '<p class="small muted">Last time: ' + esc(last.achievement) + '</p>' : '') +
       '<div class="field"><label for="learning-achievement">What can you do now?</label>' +
-      '<textarea id="learning-achievement" placeholder="From memory at 80 bpm; transition still uncertain">' +
+      '<textarea id="learning-achievement" placeholder="Optional — what you achieved">' +
       esc(draft ? draft.achievement : it.result && it.result.achievement || '') + '</textarea></div>' +
       '<div class="field"><label for="learning-next">Next focus</label>' +
-      '<textarea id="learning-next" placeholder="Join bars 24–25 without stopping">' +
+      '<textarea id="learning-next" placeholder="Optional — what you want to work on next">' +
       esc(draft ? draft.nextFocus : it.result && it.result.nextFocus || '') + '</textarea></div>' +
       '<button class="btn btn-primary btn-block" data-action="save-learning">Record practice</button></div>';
   }
@@ -546,7 +622,8 @@
         : 'Nothing due') +
       '</p></section>';
 
-    html += '<button class="btn btn-primary btn-block" data-action="close-summary">Close</button>';
+    html += '<button class="btn btn-primary btn-block" data-action="close-summary">Back to today</button>' +
+      '<button class="btn btn-block" data-action="plan-extra">I have more time</button>';
     if (sum.untouched.length) {
       html += '<button class="btn btn-block btn-quiet" style="margin-top:8px" data-action="resume-session">' +
         'Back to the session</button>';
@@ -639,6 +716,7 @@
     html += '</div>';
 
     html += '<div class="stack" style="margin-top:22px">' +
+      '<button class="btn btn-block" data-action="practice-settings">Practice settings</button>' +
       '<button class="btn btn-block" data-action="export">Export backup</button>' +
       '<button class="btn btn-block" data-action="copy-export">Copy backup to clipboard</button>' +
       '<button class="btn btn-block" data-action="import">Import JSON</button>' +
@@ -722,8 +800,9 @@
       A.appliedCap(d.fragility) + ' days)</label>' +
       quick('fragility', d.fragility, 0.5) + '</div>';
 
+    html += '<div class="field"><label>Playing difficulty — 1 easy, 5 hardest (session order)</label>' + quick('practiceDifficulty', d.practiceDifficulty, 1) + '</div>';
     html += '<div class="field-row">' +
-      '<div class="field"><label>Duration (min, with repeats)</label>' + quick('durationMin', d.durationMin, 0.5) + '</div>' +
+      '<div class="field"><label>Duration (min)</label>' + quick('durationMin', d.durationMin, 0.5) + '</div>' +
       '<div class="field"><label>Content (min, to memorise)</label>' + quick('contentMin', d.contentMin, 0.5) + '</div>' +
       '</div>';
 
@@ -746,9 +825,9 @@
       }).join('') + '</select></div>' +
       '</div>';
 
-    if (d.state === 'learning') {
-      html += '<div class="field"><label>Next practice focus</label>' +
-        '<textarea data-field="learningFocus" placeholder="Bars, hands, memory, tempo, or transition">' +
+    {
+      html += '<div class="field"><label>Your practice focus (optional)</label>' +
+        '<textarea data-field="learningFocus" placeholder="Optional — your own practice focus">' +
         esc(d.learningFocus) + '</textarea></div>';
     }
 
@@ -786,7 +865,7 @@
           '" data-section="' + i + '" data-section-field="' + field + '" value="' +
           esc(sec[field] == null ? '' : sec[field]) + '" ' + (extra || '') + '></div>';
       }
-      html += '<details class="section-editor"><summary>' + esc(sec.label || 'New section') +
+      html += '<details class="section-editor" data-section-id="' + esc(sec.id) + '"><summary>' + esc(sec.label || 'New section') +
         ' <span class="tiny muted">' + (sec.enabled === false ? 'paused' : esc(sec.state || 'consolidating')) + '</span></summary>' +
         input('label', 'Name / landmark') +
         '<div class="field-row">' + input('startBar', 'First bar', 'number', 'min="1"') + input('endBar', 'Last bar', 'number', 'min="1"') + '</div>' +
@@ -806,6 +885,7 @@
     });
     html += '<button class="btn btn-sm" style="margin-top:9px" data-action="add-section">Add section</button></div>';
 
+    if (!view.editingIsNew && d.state !== 'backlog') html += '<button class="btn btn-block" data-action="practise-piece">Save and practise this piece</button>';
     if (!view.editingIsNew) {
       var live = A.pieceById(d.id);
       if (live) {
@@ -951,6 +1031,7 @@
       if (!confirm(msg)) return;
       A.commitImport(pv);
       A.correctCatalogue();
+    A.correctPreludeStates();
       view.minutes = null;
       refresh();
     };
@@ -966,9 +1047,10 @@
     if (!t) return;
 
     var tab = t.getAttribute('data-tab');
-    if (tab) { view.tab = tab; render(); return; }
+    if (tab) { captureLearningDraft(); view.tab = tab; refresh(); return; }
 
     if (t.classList.contains('grade')) {
+      if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
       A.gradeCurrent(t.getAttribute('data-grade'));
       view.pctFor = null;
       renderToday();
@@ -979,7 +1061,37 @@
     var action = t.getAttribute('data-action');
     var d = view.editing;
 
+    if (action !== 'save-learning') captureLearningDraft();
     switch (action) {
+      case 'warmup-done': A.markWarmup(true); refresh(); break;
+      case 'warmup-skip': A.markWarmup(false); refresh(); break;
+      case 'plan-extra': A.endSession(); view.extra = true; view.minutes = 15; refresh(); break;
+      case 'replan': A.endSession(); view.minutes = null; refresh(); break;
+      case 'resume-closed':
+        if (!A.resumeClosed(t.getAttribute('data-id'))) alert('Those items have already been reviewed or are no longer scheduled. You can plan a new session below.');
+        refresh(); break;
+      case 'log-today': view.logDate = null; refresh(); break;
+      case 'practice-settings': openSettings(); break;
+      case 'save-settings': {
+        var overrides = {}; DAYS.forEach(function (day,i) { overrides[i] = Math.max(0,Math.min(600,+el('budget-'+i).value || 0)); });
+        A.updateSettings({dailyOverrides:overrides,warmupMinutes:+el('warmup-minutes').value,maxLearning:+el('max-learning').value});
+        closeSheet(); view.minutes = null; refresh(); break;
+      }
+      case 'start-break': A.setBreak(true); refresh(); break;
+      case 'end-break': A.setBreak(false); view.minutes = null; refresh(); break;
+      case 'unskip-day': A.updateSettings({skippedDate:null}); refresh(); break;
+      case 'edit-practice-notes': {
+        openEditor(t.getAttribute('data-id'));
+        var sectionId = t.getAttribute('data-section-id');
+        var editors = Array.from(document.querySelectorAll('.section-editor'));
+        var editor = editors.find(function (e) { return e.getAttribute('data-section-id') === sectionId; });
+        if (editor) { editor.open = true; editor.scrollIntoView({block:'center'}); }
+        else { var notes = document.querySelector('[data-field="learningFocus"]'); if (notes) notes.scrollIntoView({block:'center'}); }
+        break;
+      }
+      case 'practise-piece': {
+        var pieceId = d.id; if (!savePiece(true)) break; closeSheet(); A.startPieceSession(pieceId); view.tab = 'today'; refresh(); break;
+      }
       case 'pause-session': pauseWithDraft(); break;
       case 'resume-paused': A.resumeSession(); refresh(); break;
       case 'resume-item': A.resumeSession(null, +t.getAttribute('data-index')); refresh(); break;
@@ -992,7 +1104,7 @@
         renderToday();
         break;
       case 'start':
-        A.startSession(view.minutes);
+        A.startSession(view.minutes, null, {extra:view.extra});
         refresh();
         window.scrollTo(0, 0);
         break;
@@ -1034,7 +1146,8 @@
         break;
       case 'finish-session':
         A.finishSession();
-        renderToday();
+        view.extra = true; view.minutes = 15;
+        refresh();
         window.scrollTo(0, 0);
         break;
       case 'resume-session': {
@@ -1048,12 +1161,14 @@
       }
 
       case 'save-learning':
+        if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
         A.setLearningCurrent({focus: el('learning-focus').value, achievement: el('learning-achievement').value, nextFocus: el('learning-next').value});
         renderToday(); window.scrollTo(0, 0); break;
       case 'retry-save': A.save(); renderSaveStatus(); break;
 
       case 'close-summary':
         A.endSession();
+        view.extra = true;
         view.minutes = null;
         view.pctFor = null;
         refresh();
@@ -1082,7 +1197,7 @@
         var f = t.getAttribute('data-field');
         var step = parseFloat(t.getAttribute('data-step'));
         var next = Math.round((d[f] + step) * 10) / 10;
-        if (f === 'fragility') next = Math.max(1, Math.min(5, next));
+        if (f === 'fragility' || f === 'practiceDifficulty') next = Math.max(1, Math.min(5, next));
         else next = Math.max(0.1, next);
         d[f] = next;
         renderEditor();
@@ -1154,6 +1269,7 @@
 
   /* Text inputs in the sheet write straight into the draft. */
   document.addEventListener('input', function (e) {
+    if (['learning-focus','learning-achievement','learning-next'].indexOf(e.target.id) >= 0) { captureLearningDraft(); return; }
     var d = view.editing;
     if (!d) return;
     var f = e.target.getAttribute('data-field');
@@ -1189,7 +1305,7 @@
     var fields = {
       title: d.title, catalogue: d.catalogue, composerId: d.composerId,
       tier: +d.tier, state: d.state, durationMin: d.durationMin, contentMin: d.contentMin,
-      fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
+      practiceDifficulty: d.practiceDifficulty, fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
       consolidatingIntervalDays: d.consolidatingIntervalDays, focusedMinutes: d.focusedMinutes,
       tags: String(d.tags).split(',').map(function (x) { return x.trim(); }).filter(Boolean)
     };
@@ -1216,7 +1332,14 @@
     A.refreshPlanEstimate(d.id);
 
     if (!silent) { closeSheet(); refresh(); }
+    return saved;
   }
+
+  document.addEventListener('change', function (e) {
+    if (e.target.id === 'log-date') { view.logDate = e.target.value || null; renderToday(); }
+    if (e.target.id === 'extra-mode') { view.extra = e.target.checked; renderToday(); }
+  });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && view.booted) refresh(); });
 
   el('import-file').addEventListener('change', function () {
     if (this.files && this.files[0]) handleImportFile(this.files[0]);
