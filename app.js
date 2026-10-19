@@ -54,8 +54,7 @@
     exportReminderDays: 14,
     capacityWindowDays: 30,        // rolling window for the observed figure
     capacityNudgeDays: 14,         // sustained overrun before the one nudge
-    capacityObservedMinDays: 30,   // log must span this before observed supply
-                                   // replaces configured budget
+    capacityObservedMinDays: 30,   // history window for supporting statistics
     capacityLogDays: 90            // how much daily log to retain
   };
 
@@ -319,7 +318,7 @@
 
   function defaultSettings() {
     return {
-      targetDailyMinutes: 30,
+      targetDailyMinutes: 45,
       /* Sparse: only weekdays that differ from the target. 0 = Sunday.
        * A 0 means "no session expected", not "closed" — the app still
        * offers to practise, and gap detection skips these days. */
@@ -329,6 +328,7 @@
       lastExportDate: null,
       onBreak: false,
       warmupMinutes: 2,
+      scaleStep: null,
       capacityWatch: { overSince: null, nudgedFor: null }
     };
   }
@@ -361,6 +361,7 @@
         breaks: Array.isArray(s.breaks) ? s.breaks.filter(function (b) { return isoOrNull(b.start); }) : [],
         skippedDate: isoOrNull(s.skippedDate),
         warmupMinutes: clamp(num(s.warmupMinutes, 2), 0, 5),
+        scaleStep: s.scaleStep == null ? null : Math.max(0, Math.floor(num(s.scaleStep,0))),
         capacityWatch: {
           overSince: isoOrNull(watch.overSince),
           nudgedFor: isoOrNull(watch.nudgedFor)
@@ -968,20 +969,53 @@
     });
   }
 
+  var SCALE_KEYS = ['C major','A minor','G major','E minor','D major','B minor',
+    'A major','F-sharp minor','E major','C-sharp minor','B major','G-sharp minor',
+    'F-sharp major','E-flat minor','D-flat major','B-flat minor','A-flat major','F minor',
+    'E-flat major','C minor','B-flat major','G minor','F major','D minor'];
+
+  function scaleAtStep(step) {
+    step = Math.max(0,Math.floor(num(step,0)));
+    var keyIndex = step % SCALE_KEYS.length, key = SCALE_KEYS[keyIndex];
+    var form = ['natural','harmonic','melodic'][(Math.floor(keyIndex / 2) + Math.floor(step / 24)) % 3];
+    return key.indexOf('minor') >= 0 ? key.replace('minor',form + ' minor') : key;
+  }
+
+  function nextScaleStep() {
+    if (store.settings.scaleStep != null) return store.settings.scaleStep;
+    // Continue after the last scale actually completed in the earlier app.
+    var completed = store.sessionArchive.concat(store.session ? [store.session] : []).map(function (s) { return s.warmup; })
+      .filter(function (w) { return w && w.status === 'done'; })
+      .sort(function (a,b) { return String(a.date || '').localeCompare(String(b.date || '')); });
+    if (!completed.length) return 0;
+    var last = completed[completed.length - 1];
+    if (last.step != null) return last.step + 1;
+    var key = String(last.scale).replace(/ (natural|harmonic|melodic) minor$/, ' minor');
+    var index = SCALE_KEYS.indexOf(key);
+    return index < 0 ? 0 : index + 1;
+  }
+
   function warmupForDate(today, minutes) {
-    var scales = ['C major','A harmonic minor','G major','E harmonic minor','D major','B harmonic minor',
-      'A major','F-sharp harmonic minor','E major','C-sharp harmonic minor','B major','G-sharp harmonic minor',
-      'F-sharp major','E-flat harmonic minor','D-flat major','B-flat harmonic minor','A-flat major','F harmonic minor',
-      'E-flat major','C harmonic minor','B-flat major','G harmonic minor','F major','D harmonic minor'];
-    var day = daysBetween('2026-10-14',today), scale = scales[((day % scales.length) + scales.length) % scales.length];
-    return {scale:scale, minutes:minutes, status:minutes > 0 ? 'pending' : 'skipped', date:today};
+    var step = nextScaleStep();
+    return {scale:scaleAtStep(step), step:step, minutes:minutes, status:minutes > 0 ? 'pending' : 'skipped', date:today};
+  }
+
+  function syncPendingWarmup() {
+    var w = store.session && store.session.warmup;
+    if (w && w.status === 'pending') {
+      w.step = nextScaleStep(); w.scale = scaleAtStep(w.step);
+    }
   }
 
   function markWarmup(done, today) {
     var s = store.session;
     if (!s || !s.warmup || s.warmup.status !== 'pending') return;
+    var completedStep = s.warmup.step == null ? nextScaleStep() : s.warmup.step;
     s.warmup.status = done ? 'done' : 'skipped'; s.warmup.date = today || todayISO();
-    if (done) { addActualMinutes(s.warmup.date, s.warmup.minutes); store.settings.lastSessionDate = s.warmup.date; }
+    if (done) {
+      store.settings.scaleStep = completedStep + 1;
+      addActualMinutes(s.warmup.date, s.warmup.minutes); store.settings.lastSessionDate = s.warmup.date;
+    }
     save();
   }
 
@@ -1683,11 +1717,8 @@
     });
   }
 
-  /* Configured budget is a plan, not a measurement. Once the log spans a full
-   * window, supply becomes what was actually practised — which counts the
-   * weekends that were configured at zero and practised anyway, and equally
-   * discounts the weekdays that were configured at 30 and skipped. Until then
-   * there is nothing to measure and the configured budget stands in. */
+  /* Supporting history statistics. The capacity comparison always uses
+   * the configured budget; completed practice is not available capacity. */
   function observedSupply(today) {
     var log = store.capacityLog;
     if (!log.length) return null;
@@ -1716,10 +1747,12 @@
     today = today || todayISO();
 
     var obs = observedSupply(today);
-    var basis = obs ? 'observed' : 'configured';
-    var supplyPerDay = obs ? obs.supplyPerDay : weeklyBudget() / 7;
-    var sessDays = obs ? obs.sessionDaysPerWeek : sessionDaysPerWeek();
+    var basis = 'configured';
+    var supplyPerDay = weeklyBudget() / 7;
+    var sessDays = sessionDaysPerWeek();
     var demand = structuralDemand(today, sessDays);
+    var warmupWeekly = store.settings.warmupMinutes * sessDays;
+    var totalWeekly = demand.totalDemand * 7 + warmupWeekly;
 
     var w = TUNING.capacityWindowDays;
     var since = addDays(today, -(w - 1));
@@ -1736,13 +1769,20 @@
       supplyBasis: basis,
       maintenanceLoadPerDay: demand.maintenanceLoad,
       learningLoadPerDay: demand.learningLoad,
-      totalDemandPerDay: demand.totalDemand,
+      totalDemandPerDay: totalWeekly / 7,
+      warmupLoadPerDay: warmupWeekly / 7,
+      maintenancePerPracticeDay: sessDays ? demand.maintenanceLoad * 7 / sessDays : null,
+      learningPerPracticeDay: sessDays ? demand.learningLoad * 7 / sessDays : null,
+      warmupPerPracticeDay: sessDays ? store.settings.warmupMinutes : null,
+      totalPerPracticeDay: sessDays ? totalWeekly / sessDays : null,
+      budgetPerPracticeDay: sessDays ? weeklyBudget() / sessDays : null,
+      totalWeekly: totalWeekly,
       supplyPerDay: supplyPerDay,
       configuredSupplyPerDay: weeklyBudget() / 7,
       observedSupplyPerDay: obs ? obs.supplyPerDay : null,
-      ratio: supplyPerDay > 0 ? demand.totalDemand / supplyPerDay : Infinity,
-      headroomPerDay: supplyPerDay - demand.totalDemand,
-      over: demand.totalDemand > supplyPerDay,
+      ratio: supplyPerDay > 0 ? totalWeekly / weeklyBudget() : null,
+      headroomPerDay: supplyPerDay - totalWeekly / 7,
+      over: totalWeekly > weeklyBudget(),
       observed: {
         daysLogged: win.length,
         windowDays: w,
@@ -1767,7 +1807,7 @@
     var w = store.settings.capacityWatch;
     var rep = capacityReport(today);
 
-    if (!rep.over) {
+    if (!rep.configuredSessionDaysPerWeek || !rep.over) {
       w.overSince = null;
       w.nudgedFor = null;
       return null;
@@ -1779,6 +1819,8 @@
     w.nudgedFor = w.overSince;
     return {
       since: w.overSince,
+      totalPerPracticeDay: rep.totalPerPracticeDay,
+      budgetPerPracticeDay: rep.budgetPerPracticeDay,
       totalDemandPerDay: rep.totalDemandPerDay,
       supplyPerDay: rep.supplyPerDay,
       supplyBasis: rep.supplyBasis,
@@ -2419,6 +2461,20 @@
     store.appliedUpdates.push(id); save(); return true;
   }
 
+  function updatePracticePreferences() {
+    var id = 'practice-preferences-20261019';
+    if (store.appliedUpdates.indexOf(id) >= 0 || needsSeed()) return false;
+    store.settings.targetDailyMinutes = 45;
+    // Preserve custom day budgets; replace the former 30-minute default.
+    for (var d = 1; d <= 5; d++) {
+      if (store.settings.dailyOverrides[d] === 30) store.settings.dailyOverrides[d] = 45;
+    }
+    store.settings.scaleStep = nextScaleStep();
+    syncPendingWarmup();
+    store.settings.capacityWatch = {overSince:null,nudgedFor:null};
+    store.appliedUpdates.push(id); save(); return true;
+  }
+
   function needsSeed() { return store.pieces.length === 0 && store.composers.length === 0; }
 
   function bootstrapFromSeed(json, today) {
@@ -2482,7 +2538,7 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.0',
+    VERSION: '6.1',
     TUNING: TUNING,
     CAPS: CAPS,
     STORAGE_KEY: STORAGE_KEY,
@@ -2521,6 +2577,7 @@
           else if (fields.dailyOverrides[d] != null) s.dailyOverrides[d] = Math.max(0, Math.round(num(fields.dailyOverrides[d], 0)));
         }
       }
+      if (fields.scaleStep != null) { s.scaleStep = Math.max(0,Math.floor(num(fields.scaleStep,0))); syncPendingWarmup(); }
       if (fields.warmupMinutes != null) s.warmupMinutes = clamp(num(fields.warmupMinutes,2),0,5);
       if (fields.skippedDate === null) s.skippedDate = null;
       if (fields.maxLearning != null) s.maxLearning = Math.max(0, Math.round(num(fields.maxLearning, s.maxLearning)));
@@ -2623,6 +2680,9 @@
     setBreak: setBreak,
     inBreak: inBreak,
     warmupForDate: warmupForDate,
+    scaleAtStep: scaleAtStep,
+    nextScaleStep: nextScaleStep,
+    updatePracticePreferences: updatePracticePreferences,
     needsSeed: needsSeed,
     bootstrapFromSeed: bootstrapFromSeed,
     launch: launch

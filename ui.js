@@ -9,6 +9,7 @@
   var view = {
     tab: 'today',
     extra: false,
+    day: null,
     logDate: null,
     minutes: null,          // current stepper value
     dismissedGap: false,
@@ -106,6 +107,7 @@
   function start() {
     A.correctCatalogue();
     A.correctPreludeStates();
+    A.updatePracticePreferences();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -114,7 +116,9 @@
 
   function refresh() {
     launchInfo = A.launch();
-    if (view.minutes == null) view.minutes = launchInfo.recommended || launchInfo.budget || 30;
+    if (view.day !== launchInfo.today) { view.day = launchInfo.today; view.extra = false; view.minutes = null; }
+    if (A.practiceLog(launchInfo.today).length || A.state().sessionArchive.some(function (s) { return s.date === launchInfo.today; })) view.extra = true;
+    if (view.minutes == null) view.minutes = view.extra ? 15 : launchInfo.recommended || launchInfo.budget || 45;
     render();
   }
 
@@ -198,7 +202,9 @@
     html += '<section class="card">';
     html += '<h2>' + (view.extra ? 'Extra practice' : 'Plan a session') + '</h2>';
 
-    if (launchInfo.zeroBudgetDay) {
+    if (view.extra) {
+      html += '<p class="ideal-line">Optional: review anything still due, then play through learned pieces you have not played today.</p>';
+    } else if (launchInfo.zeroBudgetDay) {
       html += '<p class="headline" style="font-size:1.35rem">No session scheduled</p>';
       html += '<p class="ideal-line">' + esc(DAYS[launchInfo.weekday]) + ' is set to 0 minutes. Practise anyway?</p>';
     } else if (nothingToDo) {
@@ -227,20 +233,22 @@
       '<button class="btn" data-action="more" aria-label="More time">+</button>' +
       '</div>';
 
-    html += '<label class="check-label"><input type="checkbox" id="extra-mode"' + (view.extra ? ' checked' : '') + '> Include optional full play-throughs</label><p class="tiny muted">Due work comes first. Spare time goes to learned pieces you have not played through today.</p>';
+
     html += '<p class="plan-preview">' + planPreview(built) + '</p>';
     html += warmupPreview(built.warmup);
 
     html += '<div class="stack" style="margin-top:16px">' +
-      '<button class="btn btn-primary btn-block" data-action="start">Start</button>' +
-      '<button class="btn btn-quiet btn-block" data-action="skip-today">' +
+      '<button class="btn btn-primary btn-block" data-action="start">' + (view.extra ? 'Start extra practice' : 'Start') + '</button>';
+    if (!view.extra) html += '<button class="btn btn-quiet btn-block" data-action="skip-today">' +
       (launchInfo.zeroBudgetDay ? 'Not today' : 'Skip today') + '</button>' +
-      '</div>';
+      '<button class="btn btn-quiet btn-block" data-action="optional-practice">Plan optional practice</button>';
+    html += '</div>';
 
     html += '</section>';
 
     html += '<div class="row-between session-options"><button class="btn btn-quiet" data-action="start-break">No piano / take a break</button><button class="btn btn-quiet" data-action="practice-settings">Practice settings</button></div>';
-    html += renderPlan(built.items, null);
+    if (view.extra) html += '<details class="card next-session"><summary>Preview next session (' + built.items.length + ' items)</summary><p class="small muted">These are suggestions for your next session, not a record of today’s practice.</p>' + renderPlan(built.items,null,'Suggested next session') + '</details>';
+    else html += renderPlan(built.items,null,'Proposed session');
     html += renderForecast(launchInfo.forecast, today);
 
     root.innerHTML = html;
@@ -282,14 +290,15 @@
     var settings = A.state().settings;
     var html = '<h2>Practice settings</h2><p class="small muted">Your usual week. You can still practise on a zero-minute day or change the time for any session.</p>';
     DAYS.forEach(function (day,i) { html += '<div class="field"><label for="budget-' + i + '">' + esc(day) + ' (minutes)</label><input id="budget-' + i + '" type="number" min="0" max="600" value="' + A.budgetForWeekday(i) + '"></div>'; });
+    html += '<div class="field"><label for="next-scale">Next scale</label><select id="next-scale">' + Array.from({length:24},function (_,index) { var i = Math.floor(A.nextScaleStep() / 24) * 24 + index; return '<option value="' + i + '"' + (i === A.nextScaleStep() ? ' selected' : '') + '>' + esc(A.scaleAtStep(i)) + '</option>'; }).join('') + '</select><p class="tiny muted">Advances only when you complete a scale. Choose a starting point here.</p></div>';
     html += '<div class="field"><label for="warmup-minutes">Scale warmup (minutes; 0 to turn off)</label><input id="warmup-minutes" type="number" min="0" max="5" value="' + settings.warmupMinutes + '"></div>' +
       '<div class="field"><label for="max-learning">Learning pieces per session</label><input id="max-learning" type="number" min="0" max="20" value="' + settings.maxLearning + '"></div>' +
       '<button class="btn btn-primary btn-block" data-action="save-settings">Save settings</button><button class="btn btn-quiet btn-block" data-action="close-sheet">Cancel</button>';
     openSheet(html);
   }
 
-  function renderPlan(items, session) {
-    var html = '<section class="card day-plan"><h2>' + (session ? 'Session overview' : 'Today’s plan') + '</h2>';
+  function renderPlan(items, session, title) {
+    var html = '<section class="card day-plan"><h2>' + esc(title || (session ? 'Session overview' : 'Proposed session')) + '</h2>';
     if (!items.length) return html + '<p class="muted">No reviews in this session.</p></section>';
     html += '<ol>';
     items.forEach(function (entry, i) {
@@ -381,8 +390,8 @@
     if (launchInfo.nudge && !view.dismissedNudge) {
       var n = launchInfo.nudge;
       html += '<div class="notice notice-warn"><p>Your repertoire now needs about ' +
-        mins(n.totalDemandPerDay) + ' min a day and you are practising about ' +
-        mins(n.supplyPerDay) + '. Two ways back: pause learning, or raise the daily budget.</p>' +
+        mins(n.totalPerPracticeDay) + ' min per practice day against your ' +
+        mins(n.budgetPerPracticeDay) + '-minute budget. You can pause learning or change your budget in Practice settings.</p>' +
         '<button class="dismiss" data-action="dismiss-nudge" aria-label="Dismiss">&times;</button></div>';
     }
     if (launchInfo.exportReminder && !view.dismissedExport) {
@@ -440,10 +449,10 @@
     if (session.warmup && session.warmup.status === 'pending') {
       root.innerHTML = '<h1>Warm up</h1><section class="card"><h2>' + esc(session.warmup.scale) + '</h2>' +
         '<p>About ' + mins(session.warmup.minutes) + ' minutes. One or two octaves, hands separately or together, at a comfortable tempo.</p>' +
-        '<p class="small muted">A general scale suggestion, not a passage from a piece.</p>' +
+        '<p class="small muted">The scale advances when you tap Done. Days off and skipped warmups keep your place. Minor scales rotate through natural, harmonic and melodic forms.</p>' +
         '<button class="btn btn-primary btn-block" data-action="warmup-done">Done — start pieces</button>' +
         '<button class="btn btn-quiet btn-block" data-action="warmup-skip">Skip warmup</button>' +
-        '<button class="btn btn-quiet btn-block" data-action="pause-session">Pause &amp; view plan</button></section>' + renderPlan(session.plan,null);
+        '<button class="btn btn-quiet btn-block" data-action="pause-session">Pause &amp; view plan</button></section>' + renderPlan(session.plan,null,'This session');
       return;
     }
     var it = A.currentItem();
@@ -732,30 +741,17 @@
 
   function renderCapacityCard() {
     var r = launchInfo.capacity;
-    var pct = Math.min(140, Math.round(r.ratio * 100));
-    var basisNote = r.supplyBasis === 'observed'
-      ? 'from ' + mins(r.observed.sessionDaysPerWeek) + ' session days a week actually practised'
-      : 'from your configured budget — ' + r.observed.spanDays + ' of ' + r.observed.needsDays +
-        ' days logged so far';
-
-    var html = '<section class="card capacity-card">';
-    html += '<div class="row-between"><span class="big">' + Math.round(r.ratio * 100) + '%</span>' +
-      '<span class="tiny faint">of capacity</span></div>';
-    html += '<div class="meter"><i class="' + (r.over ? 'is-over' : '') +
-      '" style="width:' + Math.min(100, pct) + '%"></i></div>';
-    html += '<dl>' +
-      '<dt>Maintenance load</dt><dd>' + mins(r.maintenanceLoadPerDay) + ' min/day</dd>' +
-      '<dt>Learning load</dt><dd>' + mins(r.learningLoadPerDay) + ' min/day</dd>' +
-      '<dt><b>Total demand</b></dt><dd><b>' + mins(r.totalDemandPerDay) + ' min/day</b></dd>' +
-      '<dt>Supply (' + r.supplyBasis + ')</dt><dd>' + mins(r.supplyPerDay) + ' min/day</dd>' +
-      '</dl>';
-    html += '<p class="tiny faint" style="margin:10px 0 0">' + esc(basisNote) + '.';
-    if (r.observed.daysLogged > 0) {
-      html += ' Last 30 days: ' + mins(r.observed.meanPractisedPerDay) + ' estimated min/day completed, ' +
-        plural(r.observed.deferredItems, 'item') + ' deferred.';
-    }
-    html += '</p>';
-    html += '</section>';
+    var html = '<section class="card capacity-card"><h2>Practice time</h2>';
+    if (!r.configuredSessionDaysPerWeek) return html + '<p>No weekly practice time set.</p><p class="small muted">Set your available time to compare it with your repertoire’s estimated workload.</p><button class="btn btn-block" data-action="practice-settings">Set practice time</button></section>';
+    var percent = Math.round(r.ratio * 100);
+    html += '<p class="capacity-headline"><b>' + mins(r.totalPerPracticeDay) + ' of ' + mins(r.budgetPerPracticeDay) + ' min</b><span>per practice day · about ' + percent + '% of your time</span></p>';
+    html += '<div class="meter" role="img" aria-label="Estimated workload: ' + percent + ' percent of planned practice time"><i class="' + (r.over ? 'is-over' : '') + '" style="width:' + Math.min(100,percent) + '%"></i></div>';
+    html += '<dl><dt>Keeping learned pieces ready</dt><dd>' + mins(r.maintenancePerPracticeDay) + ' min</dd>' +
+      '<dt>Learning new pieces</dt><dd>' + mins(r.learningPerPracticeDay) + ' min</dd>' +
+      '<dt>Scale warmup</dt><dd>' + mins(r.warmupPerPracticeDay) + ' min</dd></dl>';
+    html += '<p class="small">' + (r.over ? 'About ' + mins(r.totalPerPracticeDay - r.budgetPerPracticeDay) + ' min over your daily budget.' : 'About ' + mins(r.budgetPerPracticeDay - r.totalPerPracticeDay) + ' min left per practice day.') + '</p>';
+    html += '<p class="tiny muted">Based on ' + r.weeklyBudget + ' minutes across ' + r.configuredSessionDaysPerWeek + ' practice days a week. Estimated from piece lengths and review intervals; individual days vary. This shows workload, not time recorded.</p>';
+    html += '<button class="btn btn-sm btn-quiet" data-action="practice-settings">Change practice time</button></section>';
     return html;
   }
 
@@ -840,6 +836,7 @@
         '</div>';
     }
 
+    if (d.state === 'consolidating') html += '<p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; its first interval will be 3 days.</p>';
     if (d.state === 'consolidating') html += '<div class="field"><label>Consolidation interval (days)</label>' +
       '<input type="number" min="1" max="20" data-field="consolidatingIntervalDays" value="' + (d.consolidatingIntervalDays || 3) + '"></div>';
     if (d.state === 'consolidating' || d.state === 'repair') html += '<div class="field"><label>Focused practice (minutes; blank = usual estimate)</label>' +
@@ -908,7 +905,7 @@
     if (!view.editingIsNew) {
       if (d.state === 'backlog') html += '<button class="btn" data-action="start-learning">Start learning</button>';
       if (d.state === 'learning' || d.state === 'consolidating') {
-        html += '<button class="btn" data-action="promote">Promote</button>';
+        html += '<button class="btn" data-action="promote">' + (d.state === 'consolidating' ? 'Mark established' : 'Start consolidating') + '</button>';
       }
     }
     html += '</div>';
@@ -1032,6 +1029,7 @@
       A.commitImport(pv);
       A.correctCatalogue();
     A.correctPreludeStates();
+    A.updatePracticePreferences();
       view.minutes = null;
       refresh();
     };
@@ -1063,6 +1061,7 @@
 
     if (action !== 'save-learning') captureLearningDraft();
     switch (action) {
+      case 'optional-practice': view.extra = true; view.minutes = 15; refresh(); break;
       case 'warmup-done': A.markWarmup(true); refresh(); break;
       case 'warmup-skip': A.markWarmup(false); refresh(); break;
       case 'plan-extra': A.endSession(); view.extra = true; view.minutes = 15; refresh(); break;
@@ -1074,7 +1073,7 @@
       case 'practice-settings': openSettings(); break;
       case 'save-settings': {
         var overrides = {}; DAYS.forEach(function (day,i) { overrides[i] = Math.max(0,Math.min(600,+el('budget-'+i).value || 0)); });
-        A.updateSettings({dailyOverrides:overrides,warmupMinutes:+el('warmup-minutes').value,maxLearning:+el('max-learning').value});
+        A.updateSettings({dailyOverrides:overrides,warmupMinutes:+el('warmup-minutes').value,scaleStep:+el('next-scale').value,maxLearning:+el('max-learning').value});
         closeSheet(); view.minutes = null; refresh(); break;
       }
       case 'start-break': A.setBreak(true); refresh(); break;
@@ -1337,7 +1336,6 @@
 
   document.addEventListener('change', function (e) {
     if (e.target.id === 'log-date') { view.logDate = e.target.value || null; renderToday(); }
-    if (e.target.id === 'extra-mode') { view.extra = e.target.checked; renderToday(); }
   });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && view.booted) refresh(); });
 
