@@ -110,6 +110,7 @@
     A.correctPreludeStates();
     A.updatePracticePreferences();
     A.expandRepertoire();
+    A.enableDemandPlanning();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -192,7 +193,7 @@
     if (nothingToDo && c.learning === 0 && c.backlog === c.total) {
       html += '<section class="card"><p class="headline" style="font-size:1.5rem">Nothing scheduled yet</p>' +
         '<p class="ideal-line">' + plural(c.backlog, 'piece') + ' waiting in the backlog. ' +
-        'Pick one to start learning — it will take a 10-minute slot each session.</p>' +
+        'Pick one to start learning. Learning comes last; its time estimate is yours to change.</p>' +
         '<div class="stack" style="margin-top:16px">' +
         '<button class="btn btn-primary btn-block" data-action="browse-backlog">Choose a piece</button>' +
         '<button class="btn btn-quiet btn-block" data-action="import">Import a backup instead</button>' +
@@ -205,7 +206,7 @@
     html += '<h2>' + (view.extra ? 'Extra practice' : 'Plan a session') + '</h2>';
 
     if (view.extra) {
-      html += '<p class="ideal-line">Optional: review anything still due, then play through learned pieces you have not played today.</p>';
+      html += '<p class="ideal-line">Optional: finish today’s reviews, with one extra full play-through of a learned piece. Learning comes last.</p>';
     } else if (launchInfo.zeroBudgetDay) {
       html += '<p class="headline" style="font-size:1.35rem">No session scheduled</p>';
       html += '<p class="ideal-line">' + esc(DAYS[launchInfo.weekday]) + ' is set to 0 minutes. Practise anyway?</p>';
@@ -213,11 +214,7 @@
       html += '<p class="headline">Nothing due</p>';
       html += '<p class="ideal-line">Next up ' + esc(nextDueSummary(today)) + '.</p>';
     } else {
-      html += '<p class="headline">' + launchInfo.recommended + ' <small>min recommended</small></p>';
-      if (launchInfo.ideal > launchInfo.recommended + 0.5) {
-        html += '<p class="ideal-line">Clearing everything due today would take ' +
-          mins(launchInfo.ideal) + ' min.</p>';
-      }
+      html += '<p class="headline">' + mins(built.plannedMin) + ' <small>min estimated</small></p>';
     }
 
     var counts = [];
@@ -229,12 +226,9 @@
       return '<span>' + x + '</span>';
     }).join('') + '</p>';
 
-    html += '<div class="stepper">' +
-      '<button class="btn" data-action="less" aria-label="Less time">&minus;</button>' +
-      '<div class="value"><b>' + view.minutes + ' min</b><span>this session</span></div>' +
-      '<button class="btn" data-action="more" aria-label="More time">+</button>' +
-      '</div>';
-
+    if (view.extra) html += '<p><b>' + mins(built.plannedMin) + ' min estimated</b></p>';
+    html += '<p class="small muted">No time limit. Reviews are balanced across your practice days; learning comes last.</p>';
+    if (built.allowanceMin) html += '<p class="small muted">Includes ' + mins(built.allowanceMin) + ' min for extra work on difficult passages.</p>';
 
     html += '<p class="plan-preview">' + planPreview(built) + '</p>';
     html += warmupPreview(built.warmup);
@@ -290,8 +284,10 @@
 
   function openSettings() {
     var settings = A.state().settings;
-    var html = '<h2>Practice settings</h2><p class="small muted">Your usual week. You can still practise on a zero-minute day or change the time for any session.</p>';
-    DAYS.forEach(function (day,i) { html += '<div class="field"><label for="budget-' + i + '">' + esc(day) + ' (minutes)</label><input id="budget-' + i + '" type="number" min="0" max="600" value="' + A.budgetForWeekday(i) + '"></div>'; });
+    var html = '<h2>Practice settings</h2><p class="small muted">Choose your usual practice days. Due work is balanced across these days, with no daily time limit. You can still practise on a rest day.</p>';
+    DAYS.forEach(function(day,i){html += '<label class="check-label"><input id="practice-day-'+i+'" type="checkbox"'+(A.budgetForWeekday(i)>0?' checked':'')+'> '+esc(day)+'</label>';});
+    html += '<label class="check-label"><input id="learning-enabled" type="checkbox"'+(settings.learningEnabled?' checked':'')+'> Include learning in sessions</label><p class="tiny muted">Turn off to focus on maintenance. Your learning progress stays saved.</p>';
+    html += '<div class="field"><label for="learning-minutes">Estimate per learning piece (minutes)</label><input id="learning-minutes" type="number" min="1" max="180" value="'+settings.learningMinutes+'"><p class="tiny muted">An estimate, not a limit. Hot spots use their own practice allowances.</p></div>';
     html += '<div class="field"><label for="next-scale">Next scale</label><select id="next-scale">' + Array.from({length:24},function (_,index) { var i = Math.floor(A.nextScaleStep() / 24) * 24 + index; return '<option value="' + i + '"' + (i === A.nextScaleStep() ? ' selected' : '') + '>' + esc(A.scaleAtStep(i)) + '</option>'; }).join('') + '</select><p class="tiny muted">Advances only when you complete a scale. Choose a starting point here.</p></div>';
     html += '<div class="field"><label for="warmup-minutes">Scale warmup (minutes; 0 to turn off)</label><input id="warmup-minutes" type="number" min="0" max="5" value="' + settings.warmupMinutes + '"></div>' +
       '<div class="field"><label for="max-learning">Learning pieces per session</label><input id="max-learning" type="number" min="0" max="20" value="' + settings.maxLearning + '"></div>' +
@@ -308,7 +304,7 @@
       if (!p) return;
       var sec = entry.sectionId && p.sections.find(function (x) { return x.id === entry.sectionId; });
       var r = session && session.results[i];
-      var status = !r ? 'To do' : r.skipped ? 'Skipped' : r.learning ? 'Recorded' : (r.grade === 'broke' ? 'Broke down' : r.grade === 'clean' ? 'Clean' : 'Wobbled');
+      var status = !r ? 'To do' : r.finished===false ? 'In progress' : r.skipped ? 'Skipped' : r.learning ? 'Recorded' : (r.grade === 'broke' ? 'Broke down' : r.grade === 'clean' ? 'Clean' : 'Wobbled');
       var label = sec ? sec.label : entry.kind === 'continuity' ? 'Full play-through' : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
       html += '<li class="' + (r ? 'plan-recorded' : '') + '">' +
         (session ? '<button class="plan-item" data-action="resume-item" data-index="' + i + '">' : '<div class="plan-item">') +
@@ -322,7 +318,7 @@
 
   function renderPaused(root, session, today) {
     var prog = A.sessionProgress();
-    var remaining = session.plan.reduce(function (n,it,i) { return n + (session.results[i] ? 0 : it.estMin); },0);
+    var remaining = session.plan.reduce(function (n,it,i) { return n + (session.results[i] && session.results[i].finished!==false ? 0 : it.estMin); },0);
     root.innerHTML = '<h1>Today</h1><p class="date-line">' + esc(longDate(today)) + '</p>' +
       '<section class="card"><h2>Session paused</h2><p>' + prog.recorded + ' of ' + prog.total +
       ' recorded · about ' + mins(remaining) + ' min left</p>' +
@@ -410,46 +406,25 @@
   }
 
   function renderForecast(forecast, today) {
-    var max = 1;
-    forecast.forEach(function (d) { max = Math.max(max, d.projectedMin, d.budget); });
-
-    var html = '<section class="card forecast">';
-    html += '<div class="forecast-head"><h2>Week ahead</h2>' +
-      '<span class="tiny faint">projected minutes</span></div>';
-    html += '<div class="bars">';
-    forecast.forEach(function (d, i) {
-      var h = Math.max(2, Math.round(d.projectedMin / max * 100));
-      var bl = Math.round(d.budget / max * 100);
-      var cls = 'bar' + (d.over ? ' is-over' : '') + (d.budget === 0 ? ' is-zero-day' : '');
-      html += '<div class="bar-col' + (i === 0 ? ' is-today' : '') + '">' +
-        '<div class="bar-wrap">' +
-        (d.budget > 0 ? '<span class="budget-line" style="bottom:' + bl + '%"></span>' : '') +
-        '<span class="' + cls + '" style="height:' + h + '%" title="' +
-        mins(d.projectedMin) + ' min"></span>' +
-        '</div>' +
-        '<span class="bar-label">' + DAYS_SHORT[d.weekday] + '</span>' +
-        '</div>';
-    });
-    html += '</div>';
-
-    var over = forecast.filter(function (d) { return d.over; });
-    if (over.length) {
-      var worst = over.slice().sort(function (a, b) { return b.overBy - a.overBy; })[0];
-      html += '<p class="tiny muted" style="margin:10px 0 0">' +
-        DAYS[worst.weekday] + ' is projected ' + mins(worst.overBy) + ' min over budget. ' +
-        'Spare minutes today pull some of it forward.</p>';
-    } else {
-      html += '<p class="tiny muted" style="margin:10px 0 0">Nothing over budget this week.</p>';
-    }
-    html += '</section>';
-    return html;
+    var max=Math.max(1,...forecast.map(function(d){return d.projectedMin;}));
+    return '<section class="card forecast"><h2>Week ahead</h2><div class="bars">'+forecast.map(function(d,i){
+      return '<div class="bar-col'+(i===0?' is-today':'')+'"><span class="tiny">'+mins(d.projectedMin)+'</span><div class="bar-wrap"><span class="bar'+(!d.practiceDay?' is-zero-day':'')+'" style="height:'+Math.max(2,Math.round(d.projectedMin/max*100))+'%"></span></div><span class="bar-label">'+DAYS_SHORT[d.weekday]+'</span><span class="tiny muted">'+(d.hardCount?d.hardCount+' hard':'')+'</span></div>';
+    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Assumes reviews go ahead at their current intervals. Stable reviews can move by up to two days; repair and frequent checks stay close to their due dates. Hard counts are whole pieces; section work is included in the minutes.</p></section>';
   }
+
+  function timerText(ms) {var seconds=Math.floor(ms/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
+  function timerControls() {
+    var t=A.timerInfo();
+    return '<div class="practice-timer"><b id="elapsed-time" aria-label="Elapsed practice time">'+timerText(t.milliseconds)+'</b><button class="btn" data-action="toggle-timer"'+(t.finished?' disabled':'')+'>'+ (t.finished?'Recorded':t.running?'Pause timer':'Resume timer')+'</button><button class="btn btn-sm btn-quiet" data-action="adjust-timer">Correct time</button></div>';
+  }
+  function beginVisibleTimer() {if(document.visibilityState==='visible'&&el('sheet').hidden)A.ensureTimer();}
 
   /* ---------- running a session ---------- */
 
   function renderSession(root, session, today) {
     if (session.warmup && session.warmup.status === 'pending') {
-      root.innerHTML = '<h1>Warm up</h1><section class="card"><h2>' + esc(session.warmup.scale) + '</h2>' +
+      beginVisibleTimer();
+      root.innerHTML = '<h1>Warm up</h1><section class="card"><h2>' + esc(session.warmup.scale) + '</h2>' + timerControls() +
         '<p>About ' + mins(session.warmup.minutes) + ' minutes. One or two octaves, hands separately or together, at a comfortable tempo.</p>' +
         '<p class="small muted">The scale advances when you tap Done. Days off and skipped warmups keep your place. Minor scales rotate through natural, harmonic and melodic forms.</p>' +
         '<button class="btn btn-primary btn-block" data-action="warmup-done">Done — start pieces</button>' +
@@ -525,17 +500,19 @@
     }
 
     if (it.result && it.result.locked) {
-      root.innerHTML = html + '<p class="small muted">This result is kept as recorded because the piece was edited afterwards.</p><button class="btn btn-block" data-action="pause-session">Back to plan</button></div>'; return;
+      root.innerHTML = html + '<p class="small muted">This result is kept as recorded because the piece was edited afterwards.</p>' + (it.result.finished===false ? timerControls()+'<button class="btn btn-primary btn-block" data-action="done-item">Done — next</button>' : '') + '<button class="btn btn-block" data-action="pause-session">Back to plan</button></div>'; return;
     }
 
+    if(!it.result || it.result.finished===false)beginVisibleTimer();
+    html += timerControls();
     if (isLearning) {
       html += renderLearningControl(p, it);
     } else {
-      html += '<div class="grades">' +
+      html += '<button class="btn btn-primary btn-block" data-action="done-item"'+(!it.result||it.result.skipped?' disabled':'')+'>Done — next</button>' + '<div class="grades">' +
         '<button class="grade" data-grade="clean">Clean</button>' +
         '<button class="grade" data-grade="wobbled">Wobbled</button>' +
         '<button class="grade" data-grade="broke">Broke down</button>' +
-        '</div>' + gradeHelp();
+        '</div><p class="small muted">Grade your first attempt, then keep practising. Tap Done when you finish this piece or section.</p>' + gradeHelp();
     }
 
     html += '<div class="nav-row">' +
@@ -577,7 +554,7 @@
       '<div class="field"><label for="learning-next">Next focus</label>' +
       '<textarea id="learning-next" placeholder="Optional — what you want to work on next">' +
       esc(draft ? draft.nextFocus : it.result && it.result.nextFocus || '') + '</textarea></div>' +
-      '<button class="btn btn-primary btn-block" data-action="save-learning">Record practice</button></div>';
+      '<button class="btn btn-primary btn-block" data-action="save-learning">Done — next</button></div>';
   }
 
   function renderSummary(root, today) {
@@ -587,7 +564,9 @@
     var html = '<h1>Done</h1>';
     html += '<p class="date-line">' + esc(longDate(sum.date)) + '</p>';
 
-    html += '<section class="card"><ul class="summary-list">';
+    var sessionId=A.state().session.id;
+    var measured=A.state().practiceTimes.filter(function(t){return t.id.indexOf(sessionId+':')===0;}).reduce(function(n,t){return n+t.minutes;},0);
+    html += '<section class="card"><p><b>'+mins(measured)+' min measured</b> · breaks excluded</p><ul class="summary-list">';
     sum.rows.forEach(function (row) {
       var p = row.piece;
       var r = row.result;
@@ -611,6 +590,7 @@
         else if (r.change && r.change.leftRepair) detail = 'back to established · ' + subject.intervalDays + 'd';
         else detail = 'every ' + subject.intervalDays + 'd';
       }
+      if(r&&r.actualMinutes!=null)detail+=(detail?' · ':'')+mins(r.actualMinutes)+' min measured';
       html += '<li><span class="g" data-grade="' + esc(r && r.pct != null ? 'pct' : label) + '">' +
         esc(label) + '</span>' +
         '<span class="t">' + esc(p.title + (row.section ? ' — ' + row.section.label : '')) + '</span>' +
@@ -628,12 +608,8 @@
         ' deferred today (' + mins(sum.deferredMin) + ' min). They stay due and rank higher next time.</p></div>';
     }
 
-    html += '<section class="card"><h2 style="font-size:0.95rem;margin:0 0 6px">Tomorrow</h2>' +
-      '<p class="small muted" style="margin:0">' +
-      (sum.dueTomorrow.length
-        ? plural(sum.dueTomorrow.length, 'review') + ' due, about ' + mins(sum.dueTomorrowMin) + ' min'
-        : 'Nothing due') +
-      '</p></section>';
+    var nextDay=A.weekPlan(today,8,false).find(function(d){return d.date>today&&d.items.length;});
+    if(nextDay)html += '<section class="card"><h2>Next practice day</h2><p>'+esc(longDate(nextDay.date))+' · '+mins(nextDay.projectedMin)+' min estimated</p></section>';
 
     html += '<button class="btn btn-primary btn-block" data-action="close-summary">Back to today</button>' +
       '<button class="btn btn-block" data-action="plan-extra">I have more time</button>';
@@ -746,19 +722,9 @@
   }
 
   function renderCapacityCard() {
-    var r = launchInfo.capacity;
-    var html = '<section class="card capacity-card"><h2>Practice time</h2>';
-    if (!r.configuredSessionDaysPerWeek) return html + '<p>No weekly practice time set.</p><p class="small muted">Set your available time to compare it with your repertoire’s estimated workload.</p><button class="btn btn-block" data-action="practice-settings">Set practice time</button></section>';
-    var percent = Math.round(r.ratio * 100);
-    html += '<p class="capacity-headline"><b>' + mins(r.totalPerPracticeDay) + ' of ' + mins(r.budgetPerPracticeDay) + ' min</b><span>per practice day · about ' + percent + '% of your time</span></p>';
-    html += '<div class="meter" role="img" aria-label="Estimated workload: ' + percent + ' percent of planned practice time"><i class="' + (r.over ? 'is-over' : '') + '" style="width:' + Math.min(100,percent) + '%"></i></div>';
-    html += '<dl><dt>Keeping learned pieces ready</dt><dd>' + mins(r.maintenancePerPracticeDay) + ' min</dd>' +
-      '<dt>Learning new pieces</dt><dd>' + mins(r.learningPerPracticeDay) + ' min</dd>' +
-      '<dt>Scale warmup</dt><dd>' + mins(r.warmupPerPracticeDay) + ' min</dd></dl>';
-    html += '<p class="small">' + (r.over ? 'About ' + mins(r.totalPerPracticeDay - r.budgetPerPracticeDay) + ' min over your daily budget.' : 'About ' + mins(r.budgetPerPracticeDay - r.totalPerPracticeDay) + ' min left per practice day.') + '</p>';
-    html += '<p class="tiny muted">Based on ' + r.weeklyBudget + ' minutes across ' + r.configuredSessionDaysPerWeek + ' practice days a week. Estimated from piece lengths and review intervals; individual days vary. This shows workload, not time recorded.</p>';
-    html += '<button class="btn btn-sm btn-quiet" data-action="practice-settings">Change practice time</button></section>';
-    return html;
+    var r=launchInfo.capacity;
+    if(!r.configuredSessionDaysPerWeek)return '<section class="card"><h2>Practice workload</h2><p>No usual practice days selected.</p><button class="btn" data-action="practice-settings">Choose practice days</button></section>';
+    return '<section class="card capacity-card"><h2>Practice workload</h2><p class="capacity-headline"><b>'+mins(r.totalWeekly)+' min over the next week</b><span>'+mins(r.totalPerPracticeDay)+' min per practice day on average</span></p><dl><dt>Maintenance per practice day</dt><dd>'+mins(r.maintenancePerPracticeDay)+' min</dd><dt>Learning per practice day</dt><dd>'+mins(r.learningPerPracticeDay)+' min</dd><dt>Scale warmup per practice day</dt><dd>'+mins(r.warmupPerPracticeDay)+' min</dd><dt>Extra allowance this week</dt><dd>'+mins(r.allowanceWeekly)+' min</dd></dl><p class="small">Measured practice in the past 7 days: <b>'+mins(r.measuredWeekly)+' min</b></p><p class="tiny muted">The estimate follows your current review schedules. There is no daily time limit. Pause learning whenever maintenance needs your time.</p><button class="btn btn-sm btn-quiet" data-action="practice-settings">Practice settings</button></section>';
   }
 
   /* ------------------------------------------------------------------ *
@@ -766,6 +732,7 @@
    * ------------------------------------------------------------------ */
 
   function openSheet(html) {
+    A.pauseTimer();
     var sheet = el('sheet');
     sheet.querySelector('.sheet-panel').innerHTML = html;
     sheet.hidden = false;
@@ -776,6 +743,7 @@
     view.editing = null;
     view.editingIsNew = false;
     view.composerQuery = '';
+    if(view.booted)refresh();
   }
 
   function openEditor(id) {
@@ -804,12 +772,15 @@
 
     html += '<div class="field"><label>Maximum review interval (days; blank = fragility default)</label><input type="number" min="1" max="60" data-field="intervalCapDays" value="' + (d.intervalCapDays || '') + '"></div>';
 
-    html += '<div class="field"><label>Playing difficulty — 1 easy, 5 hardest (session order)</label>' + quick('practiceDifficulty', d.practiceDifficulty, 1) + '</div>';
+    html += '<div class="field"><label>Playing difficulty — 1 easy, 5 hardest (order and allowance)</label>' + quick('practiceDifficulty', d.practiceDifficulty, 1) + '</div>';
     html += '<div class="field-row">' +
       '<div class="field"><label>Duration (min)</label>' + quick('durationMin', d.durationMin, 0.5) + '</div>' +
       '<div class="field"><label>Content (min, to memorise)</label>' + quick('contentMin', d.contentMin, 0.5) + '</div>' +
       '</div>';
 
+    html += '<div class="field"><label>Practice allowance (minutes; blank = automatic)</label><input type="number" min="0.25" step="0.25" data-field="practiceMinutes" value="'+(d.practiceMinutes||'')+'"><p class="tiny muted">Automatic: 3× playing time for difficulty 4–5, otherwise 1.3×. An explicit allowance takes priority over focused practice.</p></div>';
+    var measured=A.timingSummary(d.id);
+    if(measured)html += '<p class="small muted">Typical measured review: '+mins(measured.minutes)+' min (median of '+measured.sessions+' recent sessions, excluding learning and repair).</p>';
     html += '<div class="field"><label>Title</label>' +
       '<input data-field="title" value="' + esc(d.title) + '" placeholder="Prelude in G minor"></div>';
 
@@ -1050,6 +1021,7 @@
     A.correctPreludeStates();
     A.updatePracticePreferences();
     A.expandRepertoire();
+    A.enableDemandPlanning();
       view.minutes = null;
       refresh();
     };
@@ -1065,11 +1037,11 @@
     if (!t) return;
 
     var tab = t.getAttribute('data-tab');
-    if (tab) { captureLearningDraft(); view.tab = tab; refresh(); return; }
+    if (tab) { A.pauseTimer(); captureLearningDraft(); view.tab = tab; refresh(); return; }
 
     if (t.classList.contains('grade')) {
       if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
-      A.gradeCurrent(t.getAttribute('data-grade'));
+      A.timedGrade(t.getAttribute('data-grade'));
       view.pctFor = null;
       renderToday();
       window.scrollTo(0, 0);
@@ -1081,6 +1053,9 @@
 
     if (action !== 'save-learning') captureLearningDraft();
     switch (action) {
+      case 'toggle-timer': if(A.timerInfo().running)A.pauseTimer();else A.startTimer();renderToday();break;
+      case 'adjust-timer': {A.pauseTimer();var value=prompt('Practice minutes (excluding breaks):',mins(A.timerInfo().milliseconds/60000));if(value!==null&&value.trim()!==''&&Number.isFinite(+value)&&+value>=0)A.adjustTimer(+value);renderToday();break;}
+      case 'done-item': A.finishTimedItem();refresh();window.scrollTo(0,0);break;
       case 'optional-practice': view.extra = true; view.minutes = 15; refresh(); break;
       case 'warmup-done': A.markWarmup(true); refresh(); break;
       case 'warmup-skip': A.markWarmup(false); refresh(); break;
@@ -1092,8 +1067,8 @@
       case 'log-today': view.logDate = null; refresh(); break;
       case 'practice-settings': openSettings(); break;
       case 'save-settings': {
-        var overrides = {}; DAYS.forEach(function (day,i) { overrides[i] = Math.max(0,Math.min(600,+el('budget-'+i).value || 0)); });
-        A.updateSettings({dailyOverrides:overrides,warmupMinutes:+el('warmup-minutes').value,scaleStep:+el('next-scale').value,maxLearning:+el('max-learning').value});
+        var overrides = {}; DAYS.forEach(function (day,i) { overrides[i] = el('practice-day-'+i).checked ? 1 : 0; });
+        A.updateSettings({dailyOverrides:overrides,learningEnabled:el('learning-enabled').checked,learningMinutes:+el('learning-minutes').value,warmupMinutes:+el('warmup-minutes').value,scaleStep:+el('next-scale').value,maxLearning:+el('max-learning').value});
         closeSheet(); view.minutes = null; refresh(); break;
       }
       case 'start-break': A.setBreak(true); refresh(); break;
@@ -1186,7 +1161,7 @@
 
       case 'save-learning':
         if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
-        A.setLearningCurrent({focus: el('learning-focus').value, achievement: el('learning-achievement').value, nextFocus: el('learning-next').value});
+        A.finishTimedItem({focus: el('learning-focus').value, achievement: el('learning-achievement').value, nextFocus: el('learning-next').value});
         renderToday(); window.scrollTo(0, 0); break;
       case 'retry-save': A.save(); renderSaveStatus(); break;
 
@@ -1329,7 +1304,7 @@
     var fields = {
       title: d.title, catalogue: d.catalogue, composerId: d.composerId,
       tier: +d.tier, state: d.state, durationMin: d.durationMin, contentMin: d.contentMin,
-      practiceDifficulty: d.practiceDifficulty, fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
+      practiceMinutes: d.practiceMinutes, practiceDifficulty: d.practiceDifficulty, fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
       consolidatingIntervalDays: d.consolidatingIntervalDays, focusedMinutes: d.focusedMinutes,
       sectionFirst: d.sectionFirst, maxSectionsPerDay: d.maxSectionsPerDay, intervalCapDays: d.intervalCapDays,
       tags: String(d.tags).split(',').map(function (x) { return x.trim(); }).filter(Boolean)
@@ -1365,7 +1340,22 @@
   document.addEventListener('change', function (e) {
     if (e.target.id === 'log-date') { view.logDate = e.target.value || null; renderToday(); }
   });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && view.booted) refresh(); });
+  document.addEventListener('visibilitychange', function () {
+    if(document.visibilityState!=='visible'){captureLearningDraft();A.pauseTimer();releaseWakeLock();}
+    else if(view.booted)refresh();
+  });
+  window.addEventListener('pagehide',function(){captureLearningDraft();A.pauseTimer();releaseWakeLock();});
+  var wakeLock=null,wakePending=false,ticks=0;
+  function releaseWakeLock(){if(wakeLock){wakeLock.release().catch(function(){});wakeLock=null;}}
+  setInterval(function(){
+    if(!view.booted)return;
+    var timer=A.timerInfo(),label=el('elapsed-time');
+    if(label)label.textContent=timerText(timer.milliseconds);
+    if(timer.running&&++ticks%5===0)A.checkpointTimer();
+    if(timer.running&&document.visibilityState==='visible'&&navigator.wakeLock&&!wakeLock&&!wakePending){
+      wakePending=true;navigator.wakeLock.request('screen').then(function(lock){wakeLock=lock;lock.addEventListener('release',function(){wakeLock=null;});}).catch(function(){}).finally(function(){wakePending=false;});
+    } else if(!timer.running)releaseWakeLock();
+  },1000);
 
   el('import-file').addEventListener('change', function () {
     if (this.files && this.files[0]) handleImportFile(this.files[0]);

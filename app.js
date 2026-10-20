@@ -273,6 +273,7 @@
       contentMin: Math.max(0.1, num(raw.contentMin, duration)),
       fragility: clamp(num(raw.fragility, 3), 1, 5),
       practiceDifficulty: clamp(num(raw.practiceDifficulty, num(raw.fragility, 3)), 1, 5),
+      practiceMinutes: raw.practiceMinutes == null || raw.practiceMinutes === '' ? null : Math.max(.25,num(raw.practiceMinutes,1)),
       priorKnowledge: oneOf(raw.priorKnowledge, ['new', 'played', 'near'], 'new'),
       tags: Array.isArray(raw.tags) ? raw.tags.map(function (t) { return str(t); }).filter(Boolean) : [],
       notes: str(raw.notes),
@@ -356,6 +357,9 @@
     var next = {
       version: STATE_VERSION,
       settings: {
+        demandDriven: s.demandDriven === true,
+        learningEnabled: s.learningEnabled !== false,
+        learningMinutes: Math.max(1,num(s.learningMinutes,10)),
         targetDailyMinutes: Math.max(0, Math.round(num(s.targetDailyMinutes, d.targetDailyMinutes))),
         dailyOverrides: overrides,
         maxLearning: Math.max(0, Math.round(num(s.maxLearning, d.maxLearning))),
@@ -374,6 +378,8 @@
           nudgedFor: isoOrNull(watch.nudgedFor)
         }
       },
+      reviewAssignments: raw.reviewAssignments && typeof raw.reviewAssignments === 'object' ? Object.fromEntries(Object.entries(raw.reviewAssignments).filter(function(pair){return isValidISO(pair[1]);})) : {},
+      practiceTimes: Array.isArray(raw.practiceTimes) ? raw.practiceTimes.filter(function(x){return x && typeof x.id==='string' && isValidISO(x.date) && Number.isFinite(x.minutes) && x.minutes>=0;}) : [],
       appliedUpdates: Array.isArray(raw.appliedUpdates) ? raw.appliedUpdates.filter(function (id) { return typeof id === 'string'; }) : [],
       composers: Array.isArray(raw.composers) ? raw.composers.map(normalizeComposer).filter(function (c) { return c.id; }) : [],
       pieces: Array.isArray(raw.pieces) ? raw.pieces.map(normalizePiece).filter(function (p) { return p.id; }) : [],
@@ -423,6 +429,7 @@
       startedAt: isoOrNull(raw.startedAt),
       finished: raw.finished === true,
       paused: raw.paused === true,
+      timers: raw.timers && typeof raw.timers === 'object' ? Object.fromEntries(Object.entries(raw.timers).filter(function(pair){return /^(\d+|warmup)$/.test(pair[0])&&pair[1];}).map(function(pair){var t=pair[1];return [pair[0],{elapsedMs:Math.max(0,num(t.elapsedMs,0)),runningSince:null,checkpoint:null,started:t.started===true,finished:t.finished===true}];})) : {},
       learningDraft: raw.learningDraft && typeof raw.learningDraft === 'object' ? raw.learningDraft : null
     };
   }
@@ -498,6 +505,7 @@
 
   function prepareSections(p, today) {
     p.sections.forEach(function (sec, i) {
+      sec.inheritedDifficulty = p.practiceDifficulty;
       sec.fragility = sec.fragilityOverride == null ? p.fragility : sec.fragilityOverride;
       var capped = clampInterval(sec.intervalDays, sec.fragility, sec.intervalCapDays);
       if (capped !== sec.intervalDays && sec.lastPlayed) sec.nextDue = addDays(sec.lastPlayed, capped);
@@ -612,7 +620,8 @@
   function pieceCost(p) {
     if (p.practiceMinutes) return p.practiceMinutes;
     if ((p.state === 'repair' || p.state === 'consolidating') && p.focusedMinutes) return p.focusedMinutes;
-    return p.durationMin * TUNING.maintenanceCostFactor;
+    var difficulty=p.practiceDifficulty==null?(p.inheritedDifficulty==null?p.fragility:p.inheritedDifficulty):p.practiceDifficulty;
+    return p.durationMin * (store.settings.demandDriven && difficulty>=4 ? 3 : TUNING.maintenanceCostFactor);
   }
 
   function isScheduled(p) { return SCHEDULED_STATES.indexOf(p.state) >= 0; }
@@ -908,6 +917,7 @@
    * ------------------------------------------------------------------ */
 
   function learningCandidates(today) {
+    if(store.settings.demandDriven && !store.settings.learningEnabled)return [];
     return store.pieces
       .filter(function (p) { return p.state === 'learning' && !p.sectionFirst && !reviewedOn(p, today); })
       .sort(function (a, b) { return priority(b, today) - priority(a, today) || cmpId(a, b); });
@@ -945,6 +955,7 @@
    * seven days that is close enough to see a heavy Monday coming, which is all
    * it is for. Overdue pieces are projected onto today. */
   function loadForecast(today, days) {
+    if(store.settings.demandDriven)return weekPlan(today,days || 7,false);
     today = today || todayISO();
     days = days || TUNING.forecastDays;
 
@@ -1059,6 +1070,7 @@
   }
 
   function orderForWarmup(items) {
+    if(store.settings.demandDriven)return orderForPractice(items);
     return items.sort(function (a,b) {
       var ap = a.piece || pieceById(a.pieceId), bp = b.piece || pieceById(b.pieceId);
       var as = a.sectionId && sectionById(ap, a.sectionId), bs = b.sectionId && sectionById(bp, b.sectionId);
@@ -1111,16 +1123,18 @@
   function markWarmup(done, today) {
     var s = store.session;
     if (!s || !s.warmup || s.warmup.status !== 'pending') return;
+    if(store.settings.demandDriven){checkpointTimer(true);var t=currentTimer(false);if(t){t.finished=done;storeTiming(t);}}
     var completedStep = s.warmup.step == null ? nextScaleStep() : s.warmup.step;
     s.warmup.status = done ? 'done' : 'skipped'; s.warmup.date = today || todayISO();
     if (done) {
       store.settings.scaleStep = completedStep + 1;
-      addActualMinutes(s.warmup.date, s.warmup.minutes); store.settings.lastSessionDate = s.warmup.date;
+      if(!store.settings.demandDriven)addActualMinutes(s.warmup.date, s.warmup.minutes); store.settings.lastSessionDate = s.warmup.date;
     }
     save();
   }
 
   function archiveSession() {
+    if(store.settings.demandDriven)checkpointTimer(true);
     var s = store.session;
     if (!s) return;
     var copy = JSON.parse(JSON.stringify(s));
@@ -1196,7 +1210,7 @@
       return true;
     }
     var it = {pieceId:p.id,piece:p,kind:p.state === 'learning' ? 'learning' : 'continuity',
-      estMin:p.state === 'learning' ? TUNING.learningSlotMin : pieceCost(p)};
+      estMin:p.state === 'learning' ? (store.settings.demandDriven?store.settings.learningMinutes:TUNING.learningSlotMin) : pieceCost(p)};
     createSession({items:[it],budgetMin:it.estMin,plannedMin:it.estMin,demandMin:it.estMin},today,'manual');
     return true;
   }
@@ -1208,7 +1222,7 @@
       function collect(subject, sec) {
         (subject.history || []).forEach(function (h) {
           if (h.date !== date) return;
-          rows.push({pieceId:p.id,title:p.title,composer:composerName(p.composerId),section:sec ? sec.label : '',
+          rows.push({pieceId:p.id,sectionId:sec?sec.id:null,title:p.title,composer:composerName(p.composerId),section:sec ? sec.label : '',
             grade:h.grade, type:h.type, detail:h.achievement || h.focus || h.note || '', date:h.date});
         });
       }
@@ -1216,8 +1230,24 @@
     });
     store.sessionArchive.concat(store.session ? [store.session] : []).forEach(function (s) {
       if (s.warmup && s.warmup.status === 'done' && s.warmup.date === date) {
-        rows.unshift({title:s.warmup.scale,composer:'Scale warmup',type:'warmup',detail:s.warmup.minutes + ' min',date:date});
+        var timing=store.practiceTimes.find(function(t){return t.id===s.id+':warmup';});
+        rows.unshift({timingId:timing&&timing.id,title:s.warmup.scale,composer:'Scale warmup',type:'warmup',detail:timing?Math.round(timing.minutes*10)/10+' min measured':s.warmup.minutes+' min (estimate)',date:date});
       }
+    });
+    var measured={};
+    store.practiceTimes.filter(function(t){return t.date===date&&t.minutes>0;}).forEach(function(t){
+      if(rows.some(function(r){return r.timingId===t.id;}))return;
+      var key=t.pieceId+':'+(t.sectionId||'');
+      if(!measured[key])measured[key]={minutes:0,finished:true,sample:t};
+      measured[key].minutes+=t.minutes;measured[key].finished=measured[key].finished&&t.finished;
+    });
+    Object.keys(measured).forEach(function(key){
+      var group=measured[key],t=group.sample;
+      var detail=(group.minutes<.05?'<0.1':Math.round(group.minutes*10)/10)+' min measured'+(group.finished?'':' · stopped partway');
+      var row=rows.find(function(r){return r.pieceId===t.pieceId&&(r.sectionId||null)===(t.sectionId||null);});
+      if(row){row.detail+=(row.detail?' · ':'')+detail;return;}
+      var p=pieceById(t.pieceId),sec=p&&t.sectionId?sectionById(p,t.sectionId):null;
+      rows.push({pieceId:t.pieceId,title:p?p.title:t.state==='warmup'?'Scale warmup':'Removed piece',composer:p?composerName(p.composerId):'',section:sec?sec.label:'',type:'timed',detail:detail,date:t.date});
     });
     return rows;
   }
@@ -1246,6 +1276,7 @@
 
   /* Fits a session to `minutes`. Does not mutate state. */
   function buildSession(minutes, today, options) {
+    if(store.settings.demandDriven)return buildDemandSession(today,options);
     today = today || todayISO();
     options = options || {};
     var totalBudget = Math.max(0, num(minutes, 0));
@@ -1391,6 +1422,7 @@
 
   /* Everything due today, uncapped — the honest cost of clearing the day. */
   function idealMinutes(today) {
+    if(store.settings.demandDriven)return buildDemandSession(today,{}).plannedMin;
     today = today || todayISO();
     var learners = Math.min(learningCandidates(today).length, store.settings.maxLearning);
     return learners * TUNING.learningSlotMin +
@@ -1401,6 +1433,7 @@
    * proposes something absurd — but idealMinutes is shown beside it whenever
    * the two differ, so the cap hides nothing. */
   function recommendedMinutes(today) {
+    if(store.settings.demandDriven)return Math.ceil(idealMinutes(today));
     today = today || todayISO();
     var demand = idealMinutes(today);
     if (demand <= 0) return 0;
@@ -1535,7 +1568,7 @@
       result.pct = pr.pct;
       result.learning = true; result.achievement = pr.achievement; result.nextFocus = pr.nextFocus;
       result.change = pr;
-      result.countedMin = it.estMin;
+      result.countedMin = store.settings.demandDriven ? 0 : it.estMin;
     } else {
       if (!it.section && p.sectionFirst && p.state === 'learning') {
         setPieceState(p, 'consolidating', s.date);
@@ -1546,11 +1579,12 @@
       result.grade = ch.grade;
       result.pct = null;
       result.change = ch;
-      result.countedMin = it.estMin;
+      result.countedMin = store.settings.demandDriven ? 0 : it.estMin;
     }
 
     if (!payload.skip) store.settings.lastSessionDate = s.date;
     if (result.countedMin) addActualMinutes(s.date, result.countedMin);
+    if(store.settings.demandDriven)result.finished=!!payload.skip;
     s.results[i] = result;
     save();
     return result;
@@ -1562,8 +1596,8 @@
     var s = store.session;
     if (!s) return;
     var n = s.plan.length, k;
-    for (k = i + 1; k < n; k++) if (!s.results[k]) { s.index = k; return; }
-    for (k = 0; k < n; k++) if (!s.results[k]) { s.index = k; return; }
+    for (k = i + 1; k < n; k++) if (!s.results[k] || s.results[k].finished===false) { s.index = k; return; }
+    for (k = 0; k < n; k++) if (!s.results[k] || s.results[k].finished===false) { s.index = k; return; }
     s.index = n;                            // everything recorded
   }
 
@@ -1584,11 +1618,13 @@
   }
   function setProgressCurrent(pct) { return recordCurrent({ pct: pct }); }
   function skipCurrent() {
+    if(store.settings.demandDriven)checkpointTimer(true);
     var r = recordCurrent({ skip: true });
     return r ? pieceById(r.pieceId) : null;
   }
 
   function goToIndex(i) {
+    if(store.settings.demandDriven)checkpointTimer(true);
     var s = store.session;
     if (!s) return false;
     s.index = clamp(Math.round(i), 0, s.plan.length);
@@ -1608,6 +1644,7 @@
     var s = store.session;
     if (!s) return false;
     var done = clearResultAt(s.index);
+    if(done&&store.settings.demandDriven){var t=currentTimer(false);if(t){t.finished=false;storeTiming(t);}}
     if (done) save();
     return done;
   }
@@ -1616,7 +1653,7 @@
     var s = store.session;
     if (!s) return null;
     var recorded = 0;
-    for (var i = 0; i < s.results.length; i++) if (s.results[i]) recorded++;
+    for (var i = 0; i < s.results.length; i++) if (s.results[i] && s.results[i].finished!==false) recorded++;
     return {
       recorded: recorded,
       total: s.plan.length,
@@ -1626,6 +1663,7 @@
   }
 
   function pauseSession(draft) {
+    if(store.settings.demandDriven)checkpointTimer(true);
     var s = store.session;
     if (!s) return;
     if (draft) s.learningDraft = draft;
@@ -1637,20 +1675,23 @@
     if (!s) return null;
     today = today || todayISO();
     if (s.date !== today) {
+      checkpointTimer(true);
       s.results.forEach(function (r) { if (r && !r.date) r.date = s.date; });
       s.date = today;
     }
     s.paused = false; s.finished = false;
     if (index != null) s.index = clamp(Math.round(index), 0, s.plan.length);
     else {
-      s.index = s.results.findIndex(function (r) { return !r; });
+      s.index = s.results.findIndex(function (r) { return !r || r.finished===false; });
       if (s.index < 0) s.index = s.plan.length;
     }
+    if(store.settings.demandDriven)startTimer();
     save(); return s;
   }
 
   /* Closing a session preserves recorded work and unfinished items. */
   function finishSession() {
+    if(store.settings.demandDriven)checkpointTimer(true);
     var s = store.session;
     if (!s) return;
     s.finished = true; s.paused = false;
@@ -1667,7 +1708,7 @@
     for (var i = 0; i < s.plan.length; i++) {
       if (s.plan[i].pieceId !== pieceId || s.results[i]) continue;
       var subject = s.plan[i].sectionId ? sectionById(p, s.plan[i].sectionId) : p;
-      if (subject) s.plan[i].estMin = s.plan[i].kind === 'learning' ? TUNING.learningSlotMin : pieceCost(subject);
+      if (subject) s.plan[i].estMin = s.plan[i].kind === 'learning' ? (store.settings.demandDriven?store.settings.learningMinutes:TUNING.learningSlotMin) : pieceCost(subject);
     }
     save();
   }
@@ -1866,6 +1907,18 @@
   }
 
   function capacityReport(today) {
+    if(store.settings.demandDriven) {
+      var week=weekPlan(today,7,false), days=week.filter(function(d){return d.practiceDay;}).length;
+      var sum=function(k){return week.reduce(function(n,d){return n+d[k];},0);};
+      var since=addDays(today||todayISO(),-6);
+      return {totalWeekly:sum('projectedMin'),totalPerPracticeDay:days?sum('projectedMin')/days:null,
+        maintenancePerPracticeDay:days?sum('maintenanceMin')/days:null,
+        learningPerPracticeDay:days?sum('learningMin')/days:null,configuredSessionDaysPerWeek:days,
+        warmupPerPracticeDay:days?sum('warmupMin')/days:null,
+        allowanceWeekly:sum('allowanceMin'),
+        measuredWeekly:store.practiceTimes.filter(function(t){return t.date>=since&&t.date<=(today||todayISO());}).reduce(function(n,t){return n+t.minutes;},0),
+        ratio:null,over:false};
+    }
     today = today || todayISO();
 
     var obs = observedSupply(today);
@@ -1925,6 +1978,7 @@
    * episode, so a genuinely new overrun can speak up again — but the same
    * one never repeats. Mutates settings; callers save(). */
   function capacityNudge(today) {
+    if(store.settings.demandDriven)return null;
     today = today || todayISO();
     var w = store.settings.capacityWatch;
     var rep = capacityReport(today);
@@ -2341,6 +2395,7 @@
     ['composerId', 'title', 'catalogue', 'notes', 'priorKnowledge', 'learningFocus', 'learningAchievement'].forEach(function (k) {
       if (fields[k] != null) p[k] = str(fields[k]);
     });
+    if(fields.practiceMinutes !== undefined)p.practiceMinutes=fields.practiceMinutes===''||fields.practiceMinutes==null?null:Math.max(.25,num(fields.practiceMinutes,1));
     if (fields.practiceDifficulty != null) p.practiceDifficulty = clamp(num(fields.practiceDifficulty,3),1,5);
     if (fields.tier != null) p.tier = clamp(Math.round(num(fields.tier, p.tier)), 0, 3);
     if (fields.durationMin != null) p.durationMin = Math.max(0.1, num(fields.durationMin, p.durationMin));
@@ -2662,7 +2717,8 @@
     }
 
     var nudge = store.settings.onBreak ? null : capacityNudge(today);     // mutates capacityWatch
-    if (nudge || dropped) save();
+    if(store.settings.demandDriven)weekPlan(today,7,false);
+    if (nudge || dropped || store.settings.demandDriven) save();
 
     return {
       today: today,
@@ -2683,12 +2739,300 @@
     };
   }
 
+  // Demand-led planning. Saved dates pin a review within its window so simply
+  // reopening the app cannot keep pushing the same review into the future.
+  function unitKey(unit, due) { return unit.id + '@' + due; }
+  function unitParent(unit) { return pieceById(unit.parentPieceId || unit.id) || unit; }
+  function unitDifficulty(unit) {
+    var parent = unitParent(unit);
+    return unit.practiceDifficulty == null ? parent.practiceDifficulty : unit.practiceDifficulty;
+  }
+  function learningUnit(unit) { return unitParent(unit).state === 'learning'; }
+  function plannedCost(unit) {
+    if (!unit.sectionId && unit.state === 'learning') return store.settings.learningMinutes;
+    return pieceCost(unit);
+  }
+  function weekPlan(today, days, includeToday) {
+    today = today || todayISO(); days = days || 7;
+    var end = addDays(today, days - 1), buckets = {}, jobs = [];
+    for (var i=0;i<days;i++) {
+      var date=addDays(today,i);
+      buckets[date]={date:date,weekday:weekdayOf(date),items:[],maintenanceMin:0,learningMin:0,hardCount:0,hardMinutes:0};
+    }
+    var active = function (date) {
+      return (date === today && includeToday) || (!inBreak(date) && budgetForDate(date)>0 && store.settings.skippedDate!==date);
+    };
+    var units=reviewUnits().filter(function (u) {
+      return MAINTENANCE_STATES.indexOf(u.state)>=0 && u.nextDue &&
+        (!learningUnit(u) || store.settings.learningEnabled);
+    });
+    units.forEach(function (u) {
+      var due=u.nextDue, interval=Math.max(1,u.intervalDays || 1), occurrence=0;
+      while (due <= addDays(end,2) && occurrence < 20) {
+        // The first overdue occurrence is real; missed historical repetitions
+        // are not a debt and are never generated as extra jobs.
+        var effective=due<today?today:due;
+        var stable=u.state==='established' && interval>=5 && !learningUnit(u);
+        var wiggle=stable?Math.min(2,Math.floor(interval*.2)):0;
+        var earliest=addDays(effective,-wiggle), latest=addDays(effective,wiggle);
+        if(earliest<today)earliest=today;
+        if(occurrence===0 && u.lastPlayed && stable && due>=today) {
+          var capDate=addDays(u.lastPlayed,appliedCap(u.fragility,u.intervalCapDays));
+          if(latest>capDate)latest=capDate;
+        }
+        // Initial hot-spot activation dates and short review intervals stay
+        // fixed. Days off move the work to the next available practice day.
+        var candidates=[];
+        for(var d=earliest;d<=latest;d=addDays(d,1))if(active(d))candidates.push(d);
+        if(!candidates.length) {
+          var next=effective;
+          for(var guard=0;guard<21 && !active(next);guard++)next=addDays(next,1);
+          if(active(next))candidates.push(next);
+        }
+        candidates=candidates.filter(function(d){return d<=end;});
+        if(candidates.length)jobs.push({unit:u,due:due,candidates:candidates,occurrence:occurrence,stable:stable});
+        due=addDays(effective,interval); occurrence++;
+        if(u.sectionFirst && learningUnit(u) && !u.sectionId)break;
+      }
+    });
+    // Fixed work first; then place the least flexible and hardest work.
+    jobs.sort(function(a,b){
+      return a.occurrence-b.occurrence || Number(a.stable)-Number(b.stable) ||
+        Number(!(a.unit.sectionId&&!a.unit.lastPlayed))-Number(!(b.unit.sectionId&&!b.unit.lastPlayed)) ||
+        a.candidates.length-b.candidates.length ||
+        Number(unitDifficulty(b.unit)>=4)-Number(unitDifficulty(a.unit)>=4) ||
+        plannedCost(b.unit)-plannedCost(a.unit) || a.due.localeCompare(b.due) || cmpId(a.unit,b.unit);
+    });
+    var firstPlaced={}, unitDates={}, sectionCount={};
+    jobs.forEach(function(job){
+      var u=job.unit,parent=unitParent(u),isSection=!!u.sectionId, hard=unitDifficulty(u)>=4;
+      if(job.occurrence>0&&unitDates[u.id]) {
+        job.due=addDays(unitDates[u.id],Math.max(1,u.intervalDays||1));
+        var wiggle=job.stable?Math.min(2,Math.floor((u.intervalDays||1)*.2)):0;
+        job.candidates=[];
+        for(var future=addDays(job.due,-wiggle);future<=addDays(job.due,wiggle)&&future<=end;future=addDays(future,1))if(active(future))job.candidates.push(future);
+        if(!job.candidates.length)for(var future=job.due;future<=end;future=addDays(future,1))if(active(future)){job.candidates=[future];break;}
+      }
+      if(!job.candidates.length)return;
+      var key=unitKey(u,job.due), pinned=store.reviewAssignments[key];
+      var candidates=job.candidates.filter(function(d){
+        if(unitDates[u.id] && unitDates[u.id]>=d)return false;
+        return true;
+      });
+      if(isSection && parent.sectionFirst) {
+        var room=function(d){return (sectionCount[parent.id+':'+d] || 0) <
+          (d===today?sectionSlotsLeft(parent,today):parent.maxSectionsPerDay);};
+        candidates=candidates.filter(room);
+        if(!candidates.length) {
+          for(var d=job.candidates[0];d<=end;d=addDays(d,1))if(active(d)&&room(d)&&(!unitDates[u.id]||d>unitDates[u.id])){candidates=[d];break;}
+        }
+      }
+      if(!candidates.length)return;
+      function score(d) {
+        var b=buckets[d];
+        // Two hard whole pieces is a balancing preference, never an omission
+        // rule. Hard sections contribute minutes without counting as pieces.
+        return b.maintenanceMin+b.learningMin + (hard?b.hardMinutes*.8:0) +
+          (hard&&!isSection&&b.hardCount>=2?30:0) + Math.abs(daysBetween(job.due,d))*2;
+      }
+      candidates.sort(function(a,b){return score(a)-score(b)||a.localeCompare(b);});
+      var assigned=candidates.indexOf(pinned)>=0?pinned:candidates[0], b=buckets[assigned];
+      var item=reviewItem(u,assigned<job.due?'lookahead':'maintenance');
+      item.naturalDue=job.due; item.projected=job.occurrence>0;
+      b.items.push(item);
+      if(learningUnit(u))b.learningMin+=item.estMin;else b.maintenanceMin+=item.estMin;
+      if(hard){b.hardMinutes+=item.estMin;if(!isSection)b.hardCount++;}
+      unitDates[u.id]=assigned;
+      if(isSection)sectionCount[parent.id+':'+assigned]=(sectionCount[parent.id+':'+assigned]||0)+1;
+      if(job.occurrence===0)firstPlaced[key]=assigned;
+    });
+    Object.keys(firstPlaced).forEach(function(key){store.reviewAssignments[key]=firstPlaced[key];});
+    Object.keys(store.reviewAssignments).forEach(function(key){
+      if(store.reviewAssignments[key]<today || store.reviewAssignments[key]>addDays(end,14))delete store.reviewAssignments[key];
+    });
+    return Object.keys(buckets).map(function(date){
+      var b=buckets[date];
+      if(active(date) && store.settings.learningEnabled) {
+        learningCandidates(date).slice(0,store.settings.maxLearning).forEach(function(p){
+          b.items.push({pieceId:p.id,piece:p,kind:'learning',estMin:store.settings.learningMinutes});
+          b.learningMin+=store.settings.learningMinutes;
+        });
+      }
+      b.items=orderForPractice(b.items);
+      b.warmupMin=active(date)&&b.items.length?store.settings.warmupMinutes:0;
+      var subtotal=b.maintenanceMin+b.learningMin+b.warmupMin;
+      b.allowanceMin=b.hardMinutes?subtotal/9:0; // 10% of total, not 10% on top
+      b.projectedMin=subtotal+b.allowanceMin;
+      b.budget=0;b.over=false;b.overBy=0;
+      b.practiceDay=active(date);
+      return b;
+    });
+  }
+
+  function orderForPractice(items) {
+    function difficulty(it) {var p=it.piece||pieceById(it.pieceId),s=it.sectionId&&sectionById(p,it.sectionId);return s&&s.practiceDifficulty!=null?s.practiceDifficulty:p.practiceDifficulty;}
+    function learning(it){return pieceById(it.pieceId).state==='learning'||it.kind==='learning';}
+    var learners=items.filter(learning), rest=items.filter(function(it){return !learning(it);});
+    var easy=rest.filter(function(it){return difficulty(it)<4;}).sort(function(a,b){return difficulty(a)-difficulty(b);});
+    var hard=rest.filter(function(it){return difficulty(it)>=4;}).sort(function(a,b){return difficulty(a)-difficulty(b);});
+    var ordered=[];
+    if(easy.length)ordered.push(easy.shift());
+    while(hard.length||easy.length){if(hard.length)ordered.push(hard.shift());if(easy.length)ordered.push(easy.shift());}
+    // A section probe must precede a full run of the same piece.
+    ordered.concat(learners).forEach(function(it){
+      if(!it.sectionId)return;
+      var full=ordered.findIndex(function(x){return x.pieceId===it.pieceId&&!x.sectionId;});
+      var at=ordered.indexOf(it);
+      if(full>=0&&at>full){ordered.splice(at,1);ordered.splice(full,0,it);}
+    });
+    return ordered.concat(learners);
+  }
+
+  function buildDemandSession(today,options) {
+    today=today||todayISO();options=options||{};
+    var day=weekPlan(today,7,budgetForDate(today)===0&&!inBreak(today)&&store.settings.skippedDate!==today)[0];
+    var items=day.items.filter(function(it){
+      var p=it.piece,subject=it.sectionId?sectionById(p,it.sectionId):p;
+      return !it.projected && !reviewedOn(subject,today);
+    });
+    if(options.extra) {
+      // Offer one optional full piece at a time, not the whole library.
+      var next=store.pieces.filter(function(p){
+        return MAINTENANCE_STATES.indexOf(p.state)>=0 && p.state!=='repair' && !reviewedOn(p,today) &&
+          !items.some(function(it){return it.pieceId===p.id&&!it.sectionId;});
+      }).sort(function(a,b){return String(a.lastPlayed||'').localeCompare(String(b.lastPlayed||''))||cmpId(a,b);})[0];
+      if(next)items.push({pieceId:next.id,piece:next,kind:'continuity',estMin:pieceCost(next)});
+    }
+    items=orderForPractice(items);
+    var warmup=warmupForDate(today,practiceLog(today).some(function(r){return r.type==='warmup';})?0:store.settings.warmupMinutes);
+    var total=items.reduce(function(n,it){return n+it.estMin;},0)+warmup.minutes;
+    var hard=items.filter(function(it){var p=it.piece,s=it.sectionId&&sectionById(p,it.sectionId);return (s&&s.practiceDifficulty!=null?s.practiceDifficulty:p.practiceDifficulty)>=4;});
+    var allowance=hard.length?total/9:0;
+    return {date:today,items:items,warmup:warmup,budgetMin:total+allowance,plannedMin:total+allowance,
+      demandMin:total-warmup.minutes,allowanceMin:allowance,
+      learning:items.filter(function(it){return pieceById(it.pieceId).state==='learning';}),
+      maintenance:items.filter(function(it){return pieceById(it.pieceId).state!=='learning'&&it.kind==='maintenance';}),
+      lookahead:items.filter(function(it){return it.kind==='lookahead';}),
+      continuity:items.filter(function(it){return it.kind==='continuity';}),
+      hardCount:hard.filter(function(it){return !it.sectionId;}).length,
+      deferred:[],deferredCount:0,deferredMin:0,learningYielded:0,excessLearners:0};
+  }
+
+  // Timers use elapsed wall time, never the number of interval callbacks.
+  // Checkpoints bound recovery after a process is killed. Reopening never
+  // counts the period while the app was closed.
+  var timerClock=function(){return Date.now();};
+  function currentTimer(create) {
+    var s=store.session;
+    if(!s)return null;
+    var warmup=s.warmup&&s.warmup.status==='pending';
+    if(!warmup&&s.index>=s.plan.length)return null;
+    if(!s.timers)s.timers={};
+    var key=warmup?'warmup':String(s.index);
+    if(!s.timers[key]&&create)s.timers[key]={elapsedMs:0,runningSince:null,checkpoint:null,started:false,finished:false};
+    return s.timers[key]||null;
+  }
+  function elapsedTimer(t) {return t?Math.max(0,t.elapsedMs+(t.runningSince==null?0:Math.max(0,timerClock()-t.runningSince))):0;}
+  function timerInfo() {
+    var t=currentTimer(false);
+    return {milliseconds:elapsedTimer(t),running:!!t&&t.runningSince!=null,started:!!t&&t.started,finished:!!t&&t.finished};
+  }
+  function storeTiming(t) {
+    var s=store.session;if(!s||!t)return;
+    var warmup=s.warmup&&s.warmup.status==='pending',it=warmup?{pieceId:null}:s.plan[s.index];
+    if(!it)return;
+    var id=s.id+':'+(warmup?'warmup':s.index);
+    var previous=store.practiceTimes.find(function(x){return x.id===id;});
+    var minutes=t.elapsedMs/60000, delta=minutes-(previous?previous.minutes:0);
+    var row={id:id,date:(previous&&previous.date)||todayISO(),pieceId:it.pieceId,sectionId:it.sectionId||null,
+      minutes:minutes,state:previous?previous.state:(warmup?'warmup':(pieceById(it.pieceId)||{}).state),finished:t.finished};
+    if(previous)Object.assign(previous,row);else if(minutes>0)store.practiceTimes.push(row);
+    if(delta)addActualMinutes(row.date,delta);
+    var result=!warmup&&s.results[s.index];
+    if(result){result.actualMinutes=minutes;result.timingId=id;}
+  }
+  function checkpointTimer(pause) {
+    var t=currentTimer(false);
+    if(!t)return;
+    if(t.runningSince!=null){t.elapsedMs=elapsedTimer(t);t.runningSince=pause?null:timerClock();}
+    t.checkpoint=timerClock();storeTiming(t);save();
+  }
+  function startTimer() {
+    var s=store.session,t=currentTimer(true);
+    if(!t||s.paused||t.finished)return false;
+    if(t.runningSince==null){t.runningSince=timerClock();t.checkpoint=timerClock();t.started=true;save();}
+    return true;
+  }
+  function ensureTimer() {var t=currentTimer(true);if(t&&!t.started)startTimer();}
+  function adjustTimer(minutes) {
+    var t=currentTimer(true);if(!t)return;
+    t.elapsedMs=Math.max(0,num(minutes,0))*60000;t.runningSince=null;t.started=true;
+    storeTiming(t);save();
+  }
+  function timedGrade(grade) {
+    checkpointTimer(false);
+    return recordAt(store.session.index,{grade:grade});
+  }
+  function finishTimedItem(payload) {
+    var s=store.session;if(!s)return false;
+    checkpointTimer(true);
+    if(payload){recordAt(s.index,payload);s.learningDraft=null;}
+    var r=s.results[s.index];if(!r||r.skipped)return false;
+    var t=currentTimer(true);t.finished=true;storeTiming(t);r.finished=true;
+    advanceFrom(s.index);save();return true;
+  }
+  function timingSummary(id,sectionId) {
+    var rows=store.practiceTimes.filter(function(x){return x.pieceId===id&&(x.sectionId||null)===(sectionId||null)&&x.finished&&x.minutes>0&&x.state!=='repair'&&x.state!=='learning';});
+    if(rows.length<3)return null;
+    var values=rows.slice(-8).map(function(x){return x.minutes;}).sort(function(a,b){return a-b;});
+    var mid=Math.floor(values.length/2);
+    return {minutes:values.length%2?values[mid]:(values[mid-1]+values[mid])/2,sessions:values.length};
+  }
+  function enableDemandPlanning() {
+    var id='demand-timer-20261020';
+    if(needsSeed()||store.appliedUpdates.indexOf(id)>=0)return false;
+    store.settings.demandDriven=true;store.settings.learningEnabled=true;
+    [8,12,14,16,18,19].forEach(function(n){
+      var p=store.pieces.find(function(p){return p.composerId==='chopin'&&p.catalogue==='Op. 28 No. '+n;});
+      if(p){p.practiceDifficulty=Math.max(4,p.practiceDifficulty);if(n===16&&p.practiceMinutes==null)p.practiceMinutes=5;}
+    });
+    var b=store.pieces.find(function(p){return p.composerId==='chopin'&&p.catalogue==='Op. 23';});
+    if(b&&b.practiceMinutes==null)b.practiceMinutes=13;
+    // A live plan keeps its items and grades, but its unrecorded estimates
+    // need the new allowances. No review dates or histories are rewritten.
+    if(store.session)store.session.plan.forEach(function(it,i){
+      if(store.session.results[i])return;
+      var p=pieceById(it.pieceId),subject=p&&(it.sectionId?sectionById(p,it.sectionId):p);
+      if(subject)it.estMin=it.kind==='learning'?store.settings.learningMinutes:pieceCost(subject);
+    });
+    if(store.session){
+      var session=store.session,slots=[];
+      session.plan.forEach(function(it,i){if(!session.results[i])slots.push(i);});
+      var ordered=orderForPractice(slots.map(function(i){return session.plan[i];}));
+      slots.forEach(function(index,i){session.plan[index]=ordered[i];});
+    }
+    store.appliedUpdates.push(id);save();return true;
+  }
+
+
   /* ------------------------------------------------------------------ *
    * Public API
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.2',
+    VERSION: '6.3',
+    weekPlan:weekPlan,
+    timerInfo:timerInfo,
+    ensureTimer:ensureTimer,
+    startTimer:startTimer,
+    pauseTimer:function(){checkpointTimer(true);},
+    checkpointTimer:function(){checkpointTimer(false);},
+    adjustTimer:adjustTimer,
+    timedGrade:timedGrade,
+    finishTimedItem:finishTimedItem,
+    timingSummary:timingSummary,
+    enableDemandPlanning:enableDemandPlanning,
+    setTimerClock:function(fn){timerClock=fn||function(){return Date.now();};},
     TUNING: TUNING,
     CAPS: CAPS,
     STORAGE_KEY: STORAGE_KEY,
@@ -2720,6 +3064,10 @@
     sessionDaysPerWeek: sessionDaysPerWeek,
     updateSettings: function (fields) {
       var s = store.settings;
+      if(fields.demandDriven!=null)s.demandDriven=fields.demandDriven===true;
+      if(fields.learningEnabled!=null)s.learningEnabled=fields.learningEnabled===true;
+      if(fields.learningMinutes!=null)s.learningMinutes=Math.max(1,num(fields.learningMinutes,10));
+      if(fields.dailyOverrides)store.reviewAssignments={};
       if (fields.targetDailyMinutes != null) s.targetDailyMinutes = Math.max(0, Math.round(num(fields.targetDailyMinutes, s.targetDailyMinutes)));
       if (fields.dailyOverrides) {
         for (var d = 0; d <= 6; d++) {

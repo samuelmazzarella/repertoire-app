@@ -663,3 +663,6 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .pr-meta .st[data-state="learning"] { color: #2269bd; }
 @media (prefers-color-scheme: dark) { .pr-meta .st[data-state="learning"] { color: #80b8ff; } }
 .pr-notes { display: block; margin-top: 4px; }
+
+.practice-timer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 0;margin:8px 0;border-top:1px solid var(--line,#ddd)}
+.practice-timer b{font-variant-numeric:tabular-nums;font-size:1.7rem;min-width:5ch}
