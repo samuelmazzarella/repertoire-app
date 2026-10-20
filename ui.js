@@ -63,6 +63,7 @@
   function pieceLine(p, today) {
     var bits = [p.state];
     if (p.state === 'learning') {
+      if (p.sectionFirst) { var sp = A.sectionProgress(p); bits.push(sp.passed + '/' + sp.total + ' hot spots clean'); }
       if (p.learningFocus) bits.push(p.learningFocus);
       var dl = A.daysLearning(p, today);
       if (dl != null) bits.push(plural(dl, 'day') + ' in');
@@ -108,6 +109,7 @@
     A.correctCatalogue();
     A.correctPreludeStates();
     A.updatePracticePreferences();
+    A.expandRepertoire();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -461,7 +463,7 @@
     var p = it.piece;
     var subject = it.subject;
     var sec = it.section;
-    var isLearning = it.kind === 'learning' || p.state === 'learning';
+    var isLearning = !sec && !p.sectionFirst && (it.kind === 'learning' || p.state === 'learning');
     var kindLabel = sec ? 'Section check' : isLearning ? 'Learning' :
       it.kind === 'continuity' ? 'Full play-through' : it.kind === 'lookahead' ? 'Pulled forward' : 'Maintenance';
     var prog = A.sessionProgress();
@@ -487,6 +489,8 @@
     if (isLearning) {
       var dl = A.daysLearning(p, today);
       if (dl != null) html += ' · ' + plural(dl, 'day') + ' in learning';
+    } else if (p.sectionFirst && p.state === 'learning' && !sec) {
+      html += ' · first full run';
     } else {
       html += ' · every ' + subject.intervalDays + 'd · ' + subject.state;
     }
@@ -702,7 +706,9 @@
       if (open) {
         g.pieces.forEach(function (p) {
           var bits = pieceLine(p, today);
-          var overdue = A.isDue(p, today);
+          var overdue = p.sectionFirst ? A.reviewUnits().some(function (unit) {
+            return (unit.id === p.id || unit.parentPieceId === p.id) && A.isDue(unit,today);
+          }) : A.isDue(p, today);
           html += '<button class="piece-row" data-action="edit-piece" data-id="' + esc(p.id) + '">' +
             '<span class="pr-top">' +
             '<span class="pr-name">' + esc(A.composerName(p.composerId)) + ' — ' + esc(p.title) + '</span>' +
@@ -793,8 +799,10 @@
     /* Fragility and both durations first — these are corrected constantly and
        must never be buried under the metadata. */
     html += '<div class="field"><label>Fragility — how fast it decays (caps the interval at ' +
-      A.appliedCap(d.fragility) + ' days)</label>' +
+      A.appliedCap(d.fragility, d.intervalCapDays) + ' days)</label>' +
       quick('fragility', d.fragility, 0.5) + '</div>';
+
+    html += '<div class="field"><label>Maximum review interval (days; blank = fragility default)</label><input type="number" min="1" max="60" data-field="intervalCapDays" value="' + (d.intervalCapDays || '') + '"></div>';
 
     html += '<div class="field"><label>Playing difficulty — 1 easy, 5 hardest (session order)</label>' + quick('practiceDifficulty', d.practiceDifficulty, 1) + '</div>';
     html += '<div class="field-row">' +
@@ -836,7 +844,7 @@
         '</div>';
     }
 
-    if (d.state === 'consolidating') html += '<p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; its first interval will be 3 days.</p>';
+    if (d.state === 'consolidating') html += '<p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; the interval grows after clean reviews.</p>';
     if (d.state === 'consolidating') html += '<div class="field"><label>Consolidation interval (days)</label>' +
       '<input type="number" min="1" max="20" data-field="consolidatingIntervalDays" value="' + (d.consolidatingIntervalDays || 3) + '"></div>';
     if (d.state === 'consolidating' || d.state === 'repair') html += '<div class="field"><label>Focused practice (minutes; blank = usual estimate)</label>' +
@@ -855,7 +863,15 @@
       '<textarea data-field="notes" placeholder="Shown while you play">' + esc(d.notes) + '</textarea></div>';
 
     html += '<div class="field"><label>Sections (' + d.sections.length + ')</label>' +
-      '<p class="tiny muted">Each has its own schedule and repair state. Whole-piece reviews continue separately. Checks start after the piece leaves learning.</p>';
+      '<p class="tiny muted">Each has its own schedule and repair state.</p>' +
+      '<label class="check-label"><input type="checkbox" data-field="sectionFirst"' + (d.sectionFirst ? ' checked' : '') + '> Relearn through hot spots first</label>' +
+      '<p class="tiny muted">When enabled, Start learning spreads the sections across practice days. A clean result on every included section unlocks the first full run. This does not mark the whole piece established.</p>' +
+      '<div class="field"><label>Maximum hot spots per day</label><input type="number" min="1" max="6" data-field="maxSectionsPerDay" value="' + d.maxSectionsPerDay + '"></div>';
+    if (d.sectionFirst && d.state === 'learning') {
+      var progress = A.sectionProgress(d);
+      html += '<p class="small"><b>' + progress.passed + ' of ' + progress.total + ' hot spots clean.</b> ' +
+        (progress.ready ? 'The first full run is available from the next practice day.' : 'Full runs wait until all included hot spots are clean.') + '</p>';
+    }
     d.sections.forEach(function (sec, i) {
       function input(field, label, type, extra) {
         return '<div class="field"><label>' + label + '</label><input type="' + (type || 'text') +
@@ -872,6 +888,9 @@
         }).join('') + '</select></div>' +
         '<div class="field-row">' + input('durationMin', 'Playing time (min)', 'number', 'min="0.25" step="0.25"') +
         input('fragilityOverride', 'Fragility (blank = piece)', 'number', 'min="1" max="5" step="0.5"') + '</div>' +
+        '<div class="field-row">' + input('practiceDifficulty', 'Playing difficulty (1–5; blank = piece)', 'number', 'min="1" max="5"') +
+        input('practiceMinutes', 'Practice time (min; blank = usual estimate)', 'number', 'min="0.25" step="0.25"') + '</div>' +
+        input('intervalCapDays', 'Maximum interval (days; blank = fragility default)', 'number', 'min="1" max="60"') +
         input('notes', 'Practice note') +
         '<div class="field-row">' + input('intervalDays', 'Interval (days)', 'number', 'min="1"') + input('nextDue', 'Next due', 'date') + '</div>' +
         '<label class="check-label"><input type="checkbox" data-section="' + i + '" data-section-field="enabled"' +
@@ -904,7 +923,7 @@
       '<button class="btn btn-primary" data-action="save-piece">Save</button>';
     if (!view.editingIsNew) {
       if (d.state === 'backlog') html += '<button class="btn" data-action="start-learning">Start learning</button>';
-      if (d.state === 'learning' || d.state === 'consolidating') {
+      if ((d.state === 'learning' && !d.sectionFirst) || d.state === 'consolidating') {
         html += '<button class="btn" data-action="promote">' + (d.state === 'consolidating' ? 'Mark established' : 'Start consolidating') + '</button>';
       }
     }
@@ -1030,6 +1049,7 @@
       A.correctCatalogue();
     A.correctPreludeStates();
     A.updatePracticePreferences();
+    A.expandRepertoire();
       view.minutes = null;
       refresh();
     };
@@ -1089,7 +1109,12 @@
         break;
       }
       case 'practise-piece': {
-        var pieceId = d.id; if (!savePiece(true)) break; closeSheet(); A.startPieceSession(pieceId); view.tab = 'today'; refresh(); break;
+        var pieceId = d.id; if (!savePiece(true)) break;
+        if (!A.startPieceSession(pieceId)) {
+          alert('No hot spots are available today. The next group will appear on its scheduled day; full runs unlock after all included hot spots have a clean result.');
+          break;
+        }
+        closeSheet(); view.tab = 'today'; refresh(); break;
       }
       case 'pause-session': pauseWithDraft(); break;
       case 'resume-paused': A.resumeSession(); refresh(); break;
@@ -1273,7 +1298,7 @@
     if (!d) return;
     var f = e.target.getAttribute('data-field');
     if (f === 'composerQuery') { view.composerQuery = e.target.value; renderComposerLater(); return; }
-    if (f) { d[f] = e.target.value; return; }
+    if (f) { d[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; return; }
     var si = e.target.getAttribute('data-section');
     if (si != null) {
       var sf = e.target.getAttribute('data-section-field') || 'label';
@@ -1306,6 +1331,7 @@
       tier: +d.tier, state: d.state, durationMin: d.durationMin, contentMin: d.contentMin,
       practiceDifficulty: d.practiceDifficulty, fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
       consolidatingIntervalDays: d.consolidatingIntervalDays, focusedMinutes: d.focusedMinutes,
+      sectionFirst: d.sectionFirst, maxSectionsPerDay: d.maxSectionsPerDay, intervalCapDays: d.intervalCapDays,
       tags: String(d.tags).split(',').map(function (x) { return x.trim(); }).filter(Boolean)
     };
 
@@ -1321,7 +1347,9 @@
       d.id = saved.id;
       view.editingIsNew = false;
     } else {
+      A.replaceSections(d.id, d.sections);
       saved = A.updatePiece(d.id, fields);
+      d.sections = JSON.parse(JSON.stringify(saved.sections));
     }
 
     A.replaceSections(d.id, d.sections);

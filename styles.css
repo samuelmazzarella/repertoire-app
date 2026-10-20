@@ -659,3 +659,7 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .capacity-headline span { display: block; color: var(--muted); font-size: .88rem; margin-top: 4px; }
 .next-session summary { cursor: pointer; min-height: 44px; padding-top: 10px; }
 .next-session .day-plan { padding: 0; border: 0; box-shadow: none; }
+
+.pr-meta .st[data-state="learning"] { color: #2269bd; }
+@media (prefers-color-scheme: dark) { .pr-meta .st[data-state="learning"] { color: #80b8ff; } }
+.pr-notes { display: block; margin-top: 4px; }

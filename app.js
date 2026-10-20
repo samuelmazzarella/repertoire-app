@@ -224,6 +224,9 @@
       endBar: raw.endBar == null || raw.endBar === '' ? null : Math.max(1, num(raw.endBar, 1)),
       fragilityOverride: raw.fragilityOverride == null || raw.fragilityOverride === '' ? null : clamp(num(raw.fragilityOverride, 3), 1, 5),
       durationMin: Math.max(0.25, num(raw.durationMin, 1)),
+      practiceMinutes: raw.practiceMinutes == null || raw.practiceMinutes === '' ? null : Math.max(0.25, num(raw.practiceMinutes, 1)),
+      practiceDifficulty: raw.practiceDifficulty == null || raw.practiceDifficulty === '' ? null : clamp(num(raw.practiceDifficulty, 3), 1, 5),
+      intervalCapDays: raw.intervalCapDays == null || raw.intervalCapDays === '' ? null : clamp(Math.round(num(raw.intervalCapDays, 14)), 1, 60),
       prompt: oneOf(raw.prompt, ['start', 'transition', 'recover'], 'start'),
       notes: str(raw.notes), enabled: raw.enabled !== false,
       state: oneOf(raw.state, ['consolidating', 'established', 'repair'], 'consolidating'),
@@ -275,6 +278,10 @@
       notes: str(raw.notes),
       learningFocus: str(raw.learningFocus),
       learningAchievement: str(raw.learningAchievement),
+      sectionFirst: raw.sectionFirst === true,
+      sectionsStarted: isoOrNull(raw.sectionsStarted),
+      maxSectionsPerDay: clamp(Math.round(num(raw.maxSectionsPerDay, 2)), 1, 6),
+      intervalCapDays: raw.intervalCapDays == null || raw.intervalCapDays === '' ? null : clamp(Math.round(num(raw.intervalCapDays, 14)), 1, 60),
       consolidatingIntervalDays: clamp(Math.round(num(raw.consolidatingIntervalDays, 3)), 1, 20),
       focusedMinutes: raw.focusedMinutes == null || raw.focusedMinutes === '' ? null : Math.max(0.5, num(raw.focusedMinutes, 5)),
       state: state,
@@ -464,12 +471,12 @@
   }
 
   /* The cap as actually applied to an interval: 9.5 -> 10. */
-  function appliedCap(fragility) {
-    return Math.max(1, Math.round(capFor(fragility)));
+  function appliedCap(fragility, override) {
+    return override == null ? Math.max(1, Math.round(capFor(fragility))) : clamp(Math.round(override), 1, 60);
   }
 
-  function clampInterval(days, fragility) {
-    return Math.max(1, Math.min(Math.round(days), appliedCap(fragility)));
+  function clampInterval(days, fragility, override) {
+    return Math.max(1, Math.min(Math.round(days), appliedCap(fragility, override)));
   }
 
   /* Injectable so sim.js can run reproducibly. */
@@ -481,18 +488,18 @@
    * the cap it can only shorten those pieces, which is what breaks them up.
    * The cost is a slight downward bias at the cap, a percent or two of extra
    * load, paid to stop 14 preludes coming due on the same morning forever. */
-  function jitterInterval(days, fragility) {
+  function jitterInterval(days, fragility, override) {
     var j = TUNING.intervalJitter;
-    if (!j) return clampInterval(days, fragility);
-    var capped = clampInterval(days, fragility);
+    if (!j) return clampInterval(days, fragility, override);
+    var capped = clampInterval(days, fragility, override);
     var varied = capped * (1 + (rng() * 2 - 1) * j);
-    return clampInterval(varied, fragility);
+    return clampInterval(varied, fragility, override);
   }
 
   function prepareSections(p, today) {
     p.sections.forEach(function (sec, i) {
       sec.fragility = sec.fragilityOverride == null ? p.fragility : sec.fragilityOverride;
-      var capped = clampInterval(sec.intervalDays, sec.fragility);
+      var capped = clampInterval(sec.intervalDays, sec.fragility, sec.intervalCapDays);
       if (capped !== sec.intervalDays && sec.lastPlayed) sec.nextDue = addDays(sec.lastPlayed, capped);
       sec.intervalDays = capped;
       if (!sec.stateSince) sec.stateSince = today;
@@ -504,11 +511,76 @@
     return p && p.sections.filter(function (sec) { return sec.id === id; })[0] || null;
   }
 
+  function practiceDay(date, offset) {
+    // With no configured practice days, use calendar days so manual practice
+    // remains possible. A break never fabricates a successful review.
+    if (!sessionDaysPerWeek()) return addDays(date, offset);
+    while (budgetForDate(date) <= 0) date = addDays(date, 1);
+    while (offset-- > 0) {
+      do { date = addDays(date, 1); } while (budgetForDate(date) <= 0);
+    }
+    return date;
+  }
+
+  function sectionPassed(p, sec) {
+    var grades = sec.history.filter(function (h) {
+      return h.grade && h.date && (!p.sectionsStarted || h.date >= p.sectionsStarted);
+    });
+    return !!grades.length && grades[grades.length - 1].grade === 'clean';
+  }
+
+  function sectionProgress(p) {
+    var active = p.sections.filter(function (sec) { return sec.enabled; });
+    var passed = active.filter(function (sec) { return sectionPassed(p, sec); }).length;
+    return {passed:passed, total:active.length, ready:active.length > 0 && passed === active.length};
+  }
+
+  function beginSections(p, today) {
+    if (!p.sectionFirst) return;
+    p.sectionsStarted = today;
+    p.sections.filter(function (sec) { return sec.enabled; }).forEach(function (sec, i) {
+      sec.state = 'consolidating'; sec.stateSince = today;
+      sec.intervalDays = 3; sec.repairSessions = 0; sec.preRepairInterval = null;
+      // Two groups per week apart: first pair now, next pair two practice
+      // days later, last pair four practice days later.
+      sec.nextDue = practiceDay(today, Math.floor(i / p.maxSectionsPerDay) * 2);
+    });
+  }
+
+  function firstWholeDue(p) {
+    var last = p.sections.filter(function (sec) { return sec.enabled; }).reduce(function (date, sec) {
+      return sec.lastPlayed && sec.lastPlayed > date ? sec.lastPlayed : date;
+    }, p.sectionsStarted || todayISO());
+    return practiceDay(addDays(last, 1), 0);
+  }
+
+  function sectionSlotsLeft(p, today) {
+    var played = p.sections.filter(function (sec) { return reviewedOn(sec, today); }).length;
+    return Math.max(0, p.maxSectionsPerDay - played);
+  }
+
+  function spreadSections(pool, today) {
+    var used = {};
+    return pool.filter(function (unit) {
+      var parent = unit.parentPieceId && pieceById(unit.parentPieceId);
+      if (!parent || !parent.sectionFirst) return true;
+      var n = used[parent.id] || 0;
+      if (n >= sectionSlotsLeft(parent, today)) return false;
+      used[parent.id] = n + 1;
+      return true;
+    });
+  }
+
   function reviewUnits() {
     var units = [];
     store.pieces.forEach(function (p) {
-      units.push(p);
-      if (MAINTENANCE_STATES.indexOf(p.state) < 0) return;
+      if (p.sectionFirst && p.state === 'learning') {
+        if (sectionProgress(p).ready) {
+          units.push(Object.assign({}, p, {state:'consolidating', nextDue:firstWholeDue(p),
+            intervalDays:p.consolidatingIntervalDays || 7}));
+        }
+      } else units.push(p);
+      if (MAINTENANCE_STATES.indexOf(p.state) < 0 && !(p.sectionFirst && p.state === 'learning')) return;
       p.sections.forEach(function (sec) {
         if (!sec.enabled) return;
         var unit = Object.assign({}, sec);
@@ -538,6 +610,7 @@
   }
 
   function pieceCost(p) {
+    if (p.practiceMinutes) return p.practiceMinutes;
     if ((p.state === 'repair' || p.state === 'consolidating') && p.focusedMinutes) return p.focusedMinutes;
     return p.durationMin * TUNING.maintenanceCostFactor;
   }
@@ -612,7 +685,7 @@
           if (grade === 'clean' && p.repairSessions >= TUNING.repairSessionsToExit) {
             var base = p.preRepairInterval || TUNING.firstEstablishedInterval;
             setPieceState(p, 'established', today);
-            p.intervalDays = jitterInterval(base * TUNING.repairIntervalFactor, p.fragility);
+            p.intervalDays = jitterInterval(base * TUNING.repairIntervalFactor, p.fragility, p.intervalCapDays);
             p.preRepairInterval = null;
             p.repairSessions = 0;
             p.nextDue = addDays(today, p.intervalDays);
@@ -633,9 +706,9 @@
           p.nextDue = addDays(today, 1);
         } else {
           var current = p.intervalDays || TUNING.firstEstablishedInterval;
-          var capped = appliedCap(p.fragility);
+          var capped = appliedCap(p.fragility, p.intervalCapDays);
           if (early && grade === 'clean') {
-            p.intervalDays = clampInterval(current, p.fragility);
+            p.intervalDays = clampInterval(current, p.fragility, p.intervalCapDays);
           } else if (grade === 'clean') {
             /* Math.round(1 * 1.4) === 1, so without a floor of one extra day
              * an interval of 1 is an absorbing state: a piece that has
@@ -643,13 +716,13 @@
              * it, and is played daily forever. Clean must always buy at
              * least a day while there is headroom under the cap. */
             var target = Math.max(current + 1, Math.round(current * TUNING.cleanMultiplier));
-            p.intervalDays = jitterInterval(target, p.fragility);
+            p.intervalDays = jitterInterval(target, p.fragility, p.intervalCapDays);
             if (p.intervalDays <= current && current < capped) {
               p.intervalDays = Math.min(current + 1, capped);
             }
           } else {
             // An uncertain recall never earns a longer interval.
-            p.intervalDays = clampInterval(current, p.fragility);
+            p.intervalDays = clampInterval(current, p.fragility, p.intervalCapDays);
           }
           p.nextDue = addDays(today, p.intervalDays);
         }
@@ -751,18 +824,20 @@
     setPieceState(p, 'learning', today);
     p.intervalDays = TUNING.learningIntervalDays;
     p.nextDue = today;                        // available immediately
+    beginSections(p, today);
     return p;
   }
 
   function promote(p, today) {
     today = today || todayISO();
     if (p.state === 'learning') {
+      if (p.sectionFirst) return p; // first complete run starts consolidation
       setPieceState(p, 'consolidating', today);
       p.intervalDays = p.consolidatingIntervalDays || TUNING.consolidatingIntervalDays;
       p.nextDue = addDays(today, p.intervalDays);
     } else if (p.state === 'consolidating') {
       setPieceState(p, 'established', today);
-      p.intervalDays = TUNING.firstEstablishedInterval;
+      p.intervalDays = p.sectionFirst ? clampInterval(p.intervalDays || 7, p.fragility, p.intervalCapDays) : TUNING.firstEstablishedInterval;
       p.nextDue = addDays(today, p.intervalDays);
     }
     return p;
@@ -774,6 +849,7 @@
     today = today || todayISO();
     next = oneOf(next, STATES, p.state);
     if (next === p.state) return p;
+    if (p.sectionFirst && p.state === 'learning' && next !== 'backlog' && next !== 'learning') return p;
 
     setPieceState(p, next, today);
     switch (next) {
@@ -787,6 +863,7 @@
         if (!p.dateFirstLearned) p.dateFirstLearned = today;
         p.intervalDays = TUNING.learningIntervalDays;
         p.nextDue = today;
+        beginSections(p, today);
         break;
       case 'consolidating':
         if (!p.dateFirstLearned) p.dateFirstLearned = today;
@@ -795,7 +872,7 @@
         break;
       case 'established':
         if (!p.dateFirstLearned) p.dateFirstLearned = today;
-        p.intervalDays = clampInterval(p.intervalDays || TUNING.firstEstablishedInterval, p.fragility);
+        p.intervalDays = clampInterval(p.intervalDays || TUNING.firstEstablishedInterval, p.fragility, p.intervalCapDays);
         p.nextDue = today;
         break;
       case 'repair':
@@ -818,7 +895,7 @@
    * piece sitting above its new cap. */
   function reclampInterval(p, today) {
     if (!isScheduled(p) || p.intervalDays == null) return;
-    var capped = clampInterval(p.intervalDays, p.fragility);
+    var capped = clampInterval(p.intervalDays, p.fragility, p.intervalCapDays);
     if (capped !== p.intervalDays) {
       p.intervalDays = capped;
       if (p.lastPlayed) p.nextDue = addDays(p.lastPlayed, capped);
@@ -832,16 +909,26 @@
 
   function learningCandidates(today) {
     return store.pieces
-      .filter(function (p) { return p.state === 'learning' && !reviewedOn(p, today); })
+      .filter(function (p) { return p.state === 'learning' && !p.sectionFirst && !reviewedOn(p, today); })
       .sort(function (a, b) { return priority(b, today) - priority(a, today) || cmpId(a, b); });
   }
 
   function cmpId(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; }
 
   function duePool(today) {
-    return reviewUnits()
+    return spreadSections(reviewUnits()
       .filter(function (p) { return MAINTENANCE_STATES.indexOf(p.state) >= 0 && isDue(p, today) && !reviewedOn(p, today); })
       .sort(function (a, b) {
+        if (a.parentPieceId && a.parentPieceId === b.parentPieceId) {
+          var parent = pieceById(a.parentPieceId);
+          if (parent.sectionFirst && parent.state === 'learning') {
+            var attempted = function (sec) { return sec.history.some(function (h) { return h.grade && h.date >= parent.sectionsStarted; }); };
+            var unseen = Number(attempted(a)) - Number(attempted(b));
+            if (unseen) return unseen;
+            var difference = Number(sectionPassed(parent, a)) - Number(sectionPassed(parent, b));
+            if (difference) return difference;
+          }
+        }
         /* repair outranks everything, then priority, then longer pieces
          * first so ties never systematically favour the short ones. */
         var ar = a.state === 'repair' ? 1 : 0, br = b.state === 'repair' ? 1 : 0;
@@ -850,7 +937,7 @@
         if (Math.abs(d) > 1e-9) return d;
         if (b.durationMin !== a.durationMin) return b.durationMin - a.durationMin;
         return cmpId(a, b);
-      });
+      }), today);
   }
 
   /* Projected minutes per day for the week ahead. Naive by design: it assumes
@@ -861,7 +948,7 @@
     today = today || todayISO();
     days = days || TUNING.forecastDays;
 
-    var buckets = {}, order = [];
+    var buckets = {}, order = [], sectionBookings = {};
     for (var i = 0; i < days; i++) {
       var d = addDays(today, i);
       buckets[d] = 0;
@@ -875,8 +962,20 @@
       var iv = Math.max(1, p.intervalDays || 1);
       var cost = pieceCost(p);
       var d = daysBetween(p.nextDue, today) >= 0 ? today : p.nextDue;
+      var parent = p.parentPieceId ? pieceById(p.parentPieceId) : p;
       var guard = 0;
       while (daysBetween(d, horizon) >= 0 && guard++ < 400) {
+        if (parent.sectionFirst) {
+          d = practiceDay(d, 0);
+          if (p.sectionId) {
+            while ((sectionBookings[parent.id + ':' + d] || 0) >=
+                (d === today ? sectionSlotsLeft(parent,today) : parent.maxSectionsPerDay)) {
+              d = practiceDay(addDays(d,1),0);
+            }
+            var key = parent.id + ':' + d;
+            sectionBookings[key] = (sectionBookings[key] || 0) + 1;
+          }
+        }
         if (buckets[d] != null) buckets[d] += cost;
         d = addDays(d, iv);
       }
@@ -931,7 +1030,7 @@
 
     return reviewUnits()
       .filter(function (p) {
-        if (p.sectionId || reviewedOn(p, today)) return false; // no early section probes or repeated same-day reviews
+        if (p.sectionFirst || p.sectionId || reviewedOn(p, today)) return false; // no early section probes or repeated same-day reviews
         var lastReview = p.history[p.history.length - 1];
         if (lastReview && lastReview.early) return false; // allow a full interval after pulling forward
         if (p.state !== 'consolidating' && p.state !== 'established') return false;
@@ -962,7 +1061,9 @@
   function orderForWarmup(items) {
     return items.sort(function (a,b) {
       var ap = a.piece || pieceById(a.pieceId), bp = b.piece || pieceById(b.pieceId);
-      var d = (ap ? ap.practiceDifficulty : 3) - (bp ? bp.practiceDifficulty : 3);
+      var as = a.sectionId && sectionById(ap, a.sectionId), bs = b.sectionId && sectionById(bp, b.sectionId);
+      var d = (as && as.practiceDifficulty || (ap ? ap.practiceDifficulty : 3)) -
+        (bs && bs.practiceDifficulty || (bp ? bp.practiceDifficulty : 3));
       if (d) return d;
       if (a.pieceId === b.pieceId && !!a.sectionId !== !!b.sectionId) return a.sectionId ? -1 : 1;
       return cmpId(ap || {id:a.pieceId}, bp || {id:b.pieceId});
@@ -1056,8 +1157,9 @@
       if (!p || !isScheduled(p) || (it.sectionId && (!sec || sec.enabled === false))) return null;
       var subject = sec || p;
       if ((subject.history || []).some(function (h) { return h.date && h.date >= old.date; })) return null;
-      return {pieceId:p.id,piece:p,sectionId:sec ? sec.id : null,kind:p.state === 'learning' ? 'learning' : 'maintenance',
-        estMin:p.state === 'learning' ? TUNING.learningSlotMin : pieceCost(subject)};
+      if (p.sectionFirst && !sec && p.state === 'learning' && !sectionProgress(p).ready) return null;
+      return {pieceId:p.id,piece:p,sectionId:sec ? sec.id : null,kind:p.state === 'learning' && !p.sectionFirst ? 'learning' : 'maintenance',
+        estMin:p.state === 'learning' && !p.sectionFirst ? TUNING.learningSlotMin : pieceCost(subject)};
     }).filter(Boolean);
   }
 
@@ -1065,6 +1167,14 @@
     today = today || todayISO();
     var old = store.sessionArchive.find(function (s) { return s.id === id; });
     var items = unfinishedItems(old);
+    var used = {};
+    items = items.filter(function (it) {
+      var p = it.piece;
+      if (!p.sectionFirst || !it.sectionId) return true;
+      var n = used[p.id] || 0;
+      if (n >= sectionSlotsLeft(p,today)) return false;
+      used[p.id] = n + 1; return true;
+    });
     if (!items.length) return false;
     if (store.settings.onBreak) setBreak(false,today);
     var total = items.reduce(function (n,it) { return n + it.estMin; },0);
@@ -1078,6 +1188,13 @@
     var p = pieceById(id);
     if (!p || !isScheduled(p)) return false;
     if (store.settings.onBreak) setBreak(false,today);
+    if (p.sectionFirst && p.state === 'learning') {
+      var items = duePool(today).filter(function (unit) { return unit.parentPieceId === p.id || unit.id === p.id; }).map(function (unit) { return reviewItem(unit,'maintenance'); });
+      if (!items.length) return false;
+      var total = items.reduce(function (n,it) { return n + it.estMin; },0);
+      createSession({items:orderForWarmup(items),budgetMin:total,plannedMin:total,demandMin:total},today,'manual');
+      return true;
+    }
     var it = {pieceId:p.id,piece:p,kind:p.state === 'learning' ? 'learning' : 'continuity',
       estMin:p.state === 'learning' ? TUNING.learningSlotMin : pieceCost(p)};
     createSession({items:[it],budgetMin:it.estMin,plannedMin:it.estMin,demandMin:it.estMin},today,'manual');
@@ -1392,6 +1509,7 @@
     if (!it) return null;
 
     if (s.results[i] && s.results[i].locked) return null;
+    if (it.piece.sectionFirst && it.piece.state === 'learning' && !it.section && !sectionProgress(it.piece).ready) return null;
     clearResultAt(i);                       // re-recording never stacks
     var p = it.piece;
     var snap = snapshotPiece(it.subject);
@@ -1406,11 +1524,11 @@
       result.grade = null;
       result.pct = null;
       result.change = null;
-      if (p.state === 'learning') {
+      if (p.state === 'learning' && !p.sectionFirst) {
         p.nextDue = addDays(s.date, 1);
         result.pushed = true;
       }
-    } else if (it.kind === 'learning' || p.state === 'learning') {
+    } else if (!it.section && !p.sectionFirst && (it.kind === 'learning' || p.state === 'learning')) {
       var pr = payload.pct != null ? recordLearningProgress(p, payload.pct, s.date) : recordLearningNote(p, payload, s.date);
       result.skipped = false;
       result.grade = null;
@@ -1419,6 +1537,10 @@
       result.change = pr;
       result.countedMin = it.estMin;
     } else {
+      if (!it.section && p.sectionFirst && p.state === 'learning') {
+        setPieceState(p, 'consolidating', s.date);
+        p.intervalDays = p.consolidatingIntervalDays; p.nextDue = s.date;
+      }
       var ch = it.section ? gradeSection(p, it.section, payload.grade, s.date) : applyGrade(p, payload.grade, s.date);
       result.skipped = false;
       result.grade = ch.grade;
@@ -2207,6 +2329,9 @@
     if (!p) return null;
     today = today || todayISO();
 
+    if (fields.sectionFirst != null) p.sectionFirst = fields.sectionFirst === true;
+    if (fields.maxSectionsPerDay != null) p.maxSectionsPerDay = clamp(Math.round(num(fields.maxSectionsPerDay,2)),1,6);
+    if (fields.intervalCapDays !== undefined) p.intervalCapDays = fields.intervalCapDays === '' || fields.intervalCapDays === null ? null : clamp(Math.round(num(fields.intervalCapDays,14)),1,60);
     if (fields.state != null && fields.state !== p.state) {
       setStateManually(p, fields.state, today);
     }
@@ -2229,7 +2354,7 @@
     if (fields.lastPlayed !== undefined) p.lastPlayed = isoOrNull(fields.lastPlayed);
 
     if (fields.intervalDays !== undefined && p.state !== 'backlog') {
-      p.intervalDays = clampInterval(num(fields.intervalDays, p.intervalDays || 1), p.fragility);
+      p.intervalDays = clampInterval(num(fields.intervalDays, p.intervalDays || 1), p.fragility, p.intervalCapDays);
       p.nextDue = addDays(p.lastPlayed || today, p.intervalDays);
     }
     if (fields.nextDue !== undefined && p.state !== 'backlog') {
@@ -2246,9 +2371,9 @@
     if (store.session && store.session.learningDraft && store.session.learningDraft.pieceId === id && fields.learningFocus != null) store.session.learningDraft.focus = p.learningFocus;
     if (store.session) store.session.results.forEach(function (r) { if (r && r.pieceId === id) r.locked = true; });
     if (store.session) store.session.plan.forEach(function (it,i) { if (it.pieceId === id && !store.session.results[i]) {
-      it.kind = p.state === 'learning' ? 'learning' : it.kind === 'learning' ? 'maintenance' : it.kind;
+      it.kind = p.state === 'learning' && !p.sectionFirst && !it.sectionId ? 'learning' : it.kind === 'learning' ? 'maintenance' : it.kind;
     }});
-    if (fragilityChanged) { reclampInterval(p, today); prepareSections(p, today); }
+    if (fragilityChanged || fields.intervalCapDays !== undefined) { reclampInterval(p, today); prepareSections(p, today); }
     save();
     return p;
   }
@@ -2281,10 +2406,18 @@
     var used = {};
     p.sections = sections.filter(function (sec) { return str(sec.label).trim(); }).map(function (raw, i) {
       var sec = normalizeSection(raw, i), n = i + 1;
+      var existing = sectionById(p, sec.id);
+      if (p.sectionFirst && p.state === 'learning' && p.sectionsStarted === (today || todayISO()) &&
+          existing && !existing.history.some(function (h) { return h.date >= p.sectionsStarted; }) &&
+          sec.stateSince !== p.sectionsStarted) {
+        sec.state = existing.state; sec.stateSince = existing.stateSince;
+        sec.intervalDays = existing.intervalDays; sec.nextDue = existing.nextDue;
+      }
       while (used[sec.id]) sec.id = 's' + (++n);
       used[sec.id] = true; return sec;
     });
     prepareSections(p, today || todayISO());
+    if (p.sectionFirst && p.state === 'learning' && !p.sectionsStarted) beginSections(p, today || todayISO());
     var session = store.session;
     if (session) {
       var current = session.plan[session.index];
@@ -2475,6 +2608,23 @@
     store.appliedUpdates.push(id); save(); return true;
   }
 
+
+  function expandRepertoire() {
+    var id = 'repertoire-expansion-20261020';
+    if (needsSeed() || store.appliedUpdates.indexOf(id) >= 0) return false;
+    var additions = [{"id": "p082", "composerId": "rachmaninoff", "title": "Prelude in D minor", "catalogue": "Op. 23 No. 3", "tier": 1, "durationMin": 2.5, "contentMin": 2.5, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "played", "state": "backlog", "sections": [], "tags": [], "notes": "Previously memorised; last in repertoire about a year before October 2026. Duration excludes the repeat."}, {"id": "p083", "composerId": "rachmaninoff", "title": "Prelude in G major", "catalogue": "Op. 32 No. 5", "tier": 1, "durationMin": 3, "contentMin": 3, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "new", "state": "backlog", "sections": [], "tags": []}, {"id": "p084", "composerId": "rachmaninoff", "title": "Prelude in B minor", "catalogue": "Op. 32 No. 10", "tier": 1, "durationMin": 6, "contentMin": 6, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "new", "state": "backlog", "sections": [], "tags": []}, {"id": "p085", "composerId": "rachmaninoff", "title": "Prelude in D major", "catalogue": "Op. 23 No. 4", "tier": 2, "durationMin": 5, "contentMin": 5, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "new", "state": "backlog", "sections": [], "tags": []}, {"id": "p086", "composerId": "chopin", "title": "Ballade No. 1 in G minor", "catalogue": "Op. 23", "tier": 1, "durationMin": 10, "contentMin": 10, "fragility": 3, "practiceDifficulty": 5, "priorKnowledge": "played", "state": "backlog", "sections": [{"id": "ballade-hotspot-1", "label": "RH flourish (turn on A)", "notes": "1 bar; about 30 seconds for a few repetitions.", "practiceDifficulty": 3, "durationMin": 0.5, "practiceMinutes": 0.5, "intervalCapDays": 14, "fragilityOverride": 3, "state": "consolidating", "intervalDays": 3, "enabled": true, "prompt": "start", "history": []}, {"id": "ballade-hotspot-2", "label": "Sempre più mosso (G minor) into arpeggios", "notes": "21 bars.", "practiceDifficulty": 4, "durationMin": 1, "practiceMinutes": 1, "intervalCapDays": 14, "fragilityOverride": 3, "state": "consolidating", "intervalDays": 3, "enabled": true, "prompt": "start", "history": []}, {"id": "ballade-hotspot-3", "label": "Theme 1 in A major into octaves", "notes": "20 bars.", "practiceDifficulty": 4, "durationMin": 1, "practiceMinutes": 1, "intervalCapDays": 14, "fragilityOverride": 3, "state": "consolidating", "intervalDays": 3, "enabled": true, "prompt": "start", "history": []}, {"id": "ballade-hotspot-4", "label": "Sempre più animato (B♭ bass)", "notes": "12 bars.", "practiceDifficulty": 4, "durationMin": 1, "practiceMinutes": 1, "intervalCapDays": 14, "fragilityOverride": 3, "state": "consolidating", "intervalDays": 3, "enabled": true, "prompt": "start", "history": []}, {"id": "ballade-hotspot-5", "label": "Scherzando in E♭ into scales", "notes": "28 bars.", "practiceDifficulty": 4, "durationMin": 1.5, "practiceMinutes": 1.5, "intervalCapDays": 14, "fragilityOverride": 3, "state": "consolidating", "intervalDays": 3, "enabled": true, "prompt": "start", "history": []}, {"id": "ballade-hotspot-6", "label": "Coda (presto con fuoco)", "notes": "2.5 pages; about 1.5 minutes to play, 5 minutes to practise.", "practiceDifficulty": 5, "durationMin": 1.5, "practiceMinutes": 5, "intervalCapDays": 14, "fragilityOverride": 3, "state": "consolidating", "intervalDays": 3, "enabled": true, "prompt": "start", "history": []}], "tags": [], "sectionFirst": true, "intervalCapDays": 28, "consolidatingIntervalDays": 7, "maxSectionsPerDay": 2, "notes": "Known on and off for almost 20 years. Restore the hot spots before the first full run."}, {"id": "p087", "composerId": "ravel", "title": "Prélude (Le Tombeau de Couperin)", "catalogue": "M. 68 No. 1", "tier": 1, "durationMin": 3, "contentMin": 3, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "played", "state": "backlog", "sections": [], "tags": [], "notes": "Previously played at university. Playing time is an editable estimate."}, {"id": "p088", "composerId": "ravel", "title": "Menuet (Le Tombeau de Couperin)", "catalogue": "M. 68 No. 5", "tier": 3, "durationMin": 5, "contentMin": 5, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "played", "state": "backlog", "sections": [], "tags": [], "notes": "Previously played at university. Playing time is an editable estimate."}, {"id": "p089", "composerId": "ravel", "title": "Rigaudon (Le Tombeau de Couperin)", "catalogue": "M. 68 No. 4", "tier": 3, "durationMin": 3, "contentMin": 3, "fragility": 3, "practiceDifficulty": 3, "priorKnowledge": "played", "state": "backlog", "sections": [], "tags": [], "notes": "Previously played at university. Playing time is an editable estimate."}];
+    additions.forEach(function (raw) {
+      var existing = store.pieces.find(function (p) { return p.composerId === raw.composerId && p.catalogue === raw.catalogue; });
+      if (existing) return; // Never replace an existing piece or its practice.
+      var piece = normalizePiece(raw);
+      if (pieceById(piece.id)) piece.id = nextPieceId();
+      store.pieces.push(piece);
+    });
+    var jeux = store.pieces.find(function (p) { return p.composerId === 'ravel' && p.title.toLowerCase().indexOf('jeux') >= 0; });
+    if (jeux && jeux.priorKnowledge === 'new') jeux.priorKnowledge = 'played';
+    store.appliedUpdates.push(id); save(); return true;
+  }
+
   function needsSeed() { return store.pieces.length === 0 && store.composers.length === 0; }
 
   function bootstrapFromSeed(json, today) {
@@ -2538,7 +2688,7 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.1',
+    VERSION: '6.2',
     TUNING: TUNING,
     CAPS: CAPS,
     STORAGE_KEY: STORAGE_KEY,
@@ -2615,6 +2765,7 @@
     setProgressCurrent: setProgressCurrent,
     setLearningCurrent: setLearningCurrent,
     reviewUnits: reviewUnits,
+    sectionProgress: sectionProgress,
     replaceSections: replaceSections,
     normalizeSection: normalizeSection,
     skipCurrent: skipCurrent,
@@ -2670,6 +2821,7 @@
 
     // seed / launch
     correctCatalogue: correctCatalogue,
+    expandRepertoire: expandRepertoire,
     correctPreludeStates: correctPreludeStates,
     practiceLog: practiceLog,
     markWarmup: markWarmup,
