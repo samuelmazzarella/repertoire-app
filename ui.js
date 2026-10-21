@@ -71,6 +71,7 @@
       bits.push('every ' + p.intervalDays + 'd');
     }
     if (p.nextDue && p.state !== 'learning') bits.push(dueLabel(p, today));
+    if(p.technique)bits.push('technical follow-up '+p.technique.nextDue);
     bits.push(mins(p.durationMin) + ' min');
     bits.push('fragility ' + p.fragility);
     return bits;
@@ -112,6 +113,7 @@
     A.expandRepertoire();
     A.enableDemandPlanning();
     A.refinePracticeRules();
+    A.enablePerformanceSpacing();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -263,7 +265,7 @@
     else {
       html += '<ul class="summary-list">';
       rows.forEach(function (r) {
-        var result = r.type === 'warmup' ? 'Warmup' : r.grade === 'clean' ? 'Clean' : r.grade === 'wobbled' ? 'Wobbled' : r.grade === 'broke' ? 'Broke down' : 'Recorded';
+        var result = r.type === 'technical' ? 'Technique: '+(r.grade==='broke'?'broke down':r.grade) : r.issue==='technical-slip'?'Technical slip':r.issue==='technical-problem'?'Technical problem':r.issue==='effort'?'Needed thought':r.type === 'warmup' ? 'Warmup' : r.grade === 'clean' ? 'Clean' : r.grade === 'wobbled' ? 'Wobbled' : r.grade === 'broke' ? 'Broke down' : 'Recorded';
         html += '<li><span class="g">' + result + '</span><span class="t">' + esc(r.title + (r.section ? ' — ' + r.section : '')) +
           '<span class="plan-meta">' + esc(r.composer) + '</span></span><span class="d">' + esc(r.detail) + '</span></li>';
       });
@@ -306,7 +308,7 @@
       var sec = entry.sectionId && p.sections.find(function (x) { return x.id === entry.sectionId; });
       var r = session && session.results[i];
       var status = !r ? 'To do' : r.finished===false ? 'In progress' : r.skipped ? 'Skipped' : r.learning ? 'Recorded' : (r.grade === 'broke' ? 'Broke down' : r.grade === 'clean' ? 'Clean' : 'Wobbled');
-      var label = sec ? sec.label : entry.kind === 'continuity' ? 'Full play-through' : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
+      var label = entry.kind==='technical'?'Technical follow-up':sec ? sec.label : entry.kind === 'continuity' ? 'Full play-through' : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
       html += '<li class="' + (r ? 'plan-recorded' : '') + '">' +
         (session ? '<button class="plan-item" data-action="resume-item" data-index="' + i + '">' : '<div class="plan-item">') +
         '<span class="plan-title">' + esc(p.title) + '</span><span class="plan-meta">' +
@@ -354,6 +356,7 @@
   function planPreview(b) {
     var parts = [];
     if (b.learning.length) parts.push(plural(b.learning.length, 'learning piece'));
+    if(b.technical&&b.technical.length)parts.push(plural(b.technical.length,'technical follow-up'));
     if (b.maintenance.length) parts.push(b.maintenance.length + ' maintenance');
     if (b.continuity && b.continuity.length) parts.push(plural(b.continuity.length, 'full play-through'));
     if (b.lookahead.length) parts.push(b.lookahead.length + ' pulled forward');
@@ -410,7 +413,7 @@
     var max=Math.max(1,...forecast.map(function(d){return d.projectedMin;}));
     return '<section class="card forecast"><h2>Week ahead</h2><div class="bars">'+forecast.map(function(d,i){
       return '<div class="bar-col'+(i===0?' is-today':'')+'"><span class="tiny">'+mins(d.projectedMin)+'</span><div class="bar-wrap"><span class="bar'+(!d.practiceDay?' is-zero-day':'')+'" style="height:'+Math.max(2,Math.round(d.projectedMin/max*100))+'%"></span></div><span class="bar-label">'+DAYS_SHORT[d.weekday]+'</span><span class="tiny muted">'+(d.hardCount?d.hardCount+' hard':'')+'</span></div>';
-    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Balanced across the coming weeks using current review intervals. Future plans adjust after practice; repair and frequent checks stay close to their due dates. Hard counts are whole pieces; section work is included in the minutes.</p></section>';
+    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Balanced across the coming weeks using current review intervals. Established Monday reviews may move to Friday. Future plans adjust after practice; repair and frequent checks stay close to their due dates. Hard counts are whole pieces; section work is included in the minutes.</p></section>';
   }
 
   function timerText(ms) {var seconds=Math.floor(ms/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
@@ -440,7 +443,7 @@
     var subject = it.subject;
     var sec = it.section;
     var isLearning = !sec && !p.sectionFirst && (it.kind === 'learning' || p.state === 'learning');
-    var kindLabel = sec ? 'Section check' : isLearning ? 'Learning' :
+    var kindLabel = it.kind==='technical'?'Technical follow-up':sec ? 'Section check' : isLearning ? 'Learning' :
       it.kind === 'continuity' ? 'Full play-through' : it.kind === 'lookahead' ? 'Pulled forward' : 'Maintenance';
     var prog = A.sessionProgress();
 
@@ -468,12 +471,14 @@
     } else if (p.sectionFirst && p.state === 'learning' && !sec) {
       html += ' · first full run';
     } else {
-      html += ' · every ' + subject.intervalDays + 'd · ' + subject.state;
+      html += it.kind==='technical'?' · focused check · memory interval unchanged':' · every ' + subject.intervalDays + 'd · ' + subject.state;
     }
     html += ' <button class="btn btn-sm btn-quiet np-edit" data-action="edit-piece" data-id="' +
       esc(p.id) + '">Edit</button></p>';
 
-    if (sec) {
+    if(it.kind==='technical'){
+      html += '<div class="section-prompt"><strong>Check the troublesome passage before drilling it.</strong><p class="small">Work on the technical problem you flagged'+(sec?' in '+esc(sec.label):'')+'. This is a focused check, not a whole-piece memory test. Two clean checks on separate days clear the follow-up; other results keep a two-day check.</p></div>';
+    } else if (sec) {
       var prompt = sec.prompt === 'transition' ? 'Play the lead-in and transition into ' :
         sec.prompt === 'recover' ? 'Pause just before this point, then resume from memory: ' : 'Start from memory at ';
       var bars = sec.startBar ? ' · bar ' + sec.startBar + (sec.endBar ? '–' + sec.endBar : '') : '';
@@ -496,7 +501,7 @@
         (it.result.skipped ? 'Skipped' + (it.result.pushed ? ' — due tomorrow' : ' — still due')
           : it.result.learning ? 'Practice recorded'
           : it.result.pct != null ? 'Learning recorded'
-          : 'Recorded ' + esc(it.result.grade)) +
+          : 'Recorded ' + esc(it.result.grade) + (it.kind==='technical'?' · technical check':it.result.issue==='technical-slip'?' · one-off slip':it.result.issue==='technical-problem'?' · recurring technical problem':it.result.issue==='effort'?' · needed thought':'')) +
         (it.result.locked ? ' · saved record' : ' · <button class="btn btn-sm btn-quiet" data-action="undo-item">Undo</button>') + '</p>';
     }
 
@@ -514,7 +519,7 @@
           var selected=!!it.result&&it.result.grade===choice[0]&&!it.result.skipped;
           return '<button class="grade'+(selected?' is-selected':'')+'" data-grade="'+choice[0]+'" aria-label="'+choice[1]+'" aria-pressed="'+selected+'">'+(selected?'<span aria-hidden="true">✓ </span>':'')+choice[1]+'</button>';
         }).join('') +
-        '</div><p class="small muted">Grade your first attempt, then keep practising. Tap Done when you finish this piece or section.</p>' + gradeHelp();
+        '</div>'+outcomeControls(it)+'<p class="small muted">Grade your first attempt, then keep practising. Tap Done when you finish this piece or section.</p>' + gradeHelp(it.kind==='technical');
     }
 
     html += '<div class="nav-row">' +
@@ -533,12 +538,22 @@
     root.innerHTML = html;
   }
 
-  function gradeHelp() {
+  function outcomeControls(it){
+    if(!it.result||it.result.skipped||it.kind==='technical')return '';
+    var issue=it.result.issue||'memory',clean=it.result.grade==='clean';
+    var options=clean?[['memory','Secure'],['effort','Needed thought']]:[['memory','Memory stumble'],['technical-slip','One-off technical slip'],['technical-problem','Recurring technical problem']];
+    var text=issue==='technical-slip'?'Practise the spot now. The review interval stays unchanged.':issue==='technical-problem'?'A focused check is due in two days. Two clean checks clear it; the memory interval stays unchanged. Use Edit notes and sections to name the passage if needed.':issue==='effort'?'Correct recall with effort: keep the current interval.':
+      it.subject.state==='consolidating'&&it.subject.practiceDifficulty<=2?'Two secure first attempts across the current gap earn the next interval. Memory trouble returns to a shorter gap.':'The memory schedule follows this grade.';
+    return '<div class="outcome-controls"><p class="small"><b>'+(clean?'How did recall feel?':'What caused it?')+'</b></p>'+options.map(function(o){return '<button class="btn btn-sm'+(issue===o[0]?' is-selected':'')+'" data-action="grade-issue" data-issue="'+o[0]+'" aria-pressed="'+(issue===o[0])+'">'+(issue===o[0]?'✓ ':'')+o[1]+'</button>';}).join('')+'<p class="small muted" aria-live="polite">'+text+'</p></div>';
+  }
+
+  function gradeHelp(technical) {
+    if(technical)return '<details class="grade-help"><summary>What do the grades mean?</summary><p><b>Clean:</b> The passage was controlled on the first attempt at your intended tempo.</p><p><b>Wobbled or Broke down:</b> The technical problem still needs work. Check again in two days, or the next available practice day.</p><p>Two clean checks on separate days clear this follow-up. These checks do not change your memory interval or mark the whole piece learned.</p></details>';
     return '<details class="grade-help"><summary>What do the grades mean?</summary>' +
       '<p><b>Clean:</b> Recalled independently at the intended tempo, with no meaningful memory hesitation.</p>' +
       '<p><b>Wobbled:</b> Recalled without the score, but hesitated or needed to recover.</p>' +
       '<p><b>Broke down:</b> Needed the score, a prompt, or substantial reconstruction.</p>' +
-      '<p>An isolated wrong note need not be a memory failure. Grade recall before practising the piece or section.</p>' +
+      '<p>After Wobbled or Broke down, choose the cause. One-off technical slips hold the interval. Recurring technical problems add focused checks every two days, cleared by two clean checks on separate days. Technical checks never certify whole-piece memory.</p>' +
       '<p>Repair ends after three Clean checks on separate days. Wobbled does not count; Broke down restarts the count.</p></details>';
   }
 
@@ -592,6 +607,10 @@
         else if (r.change && r.change.leftRepair) detail = 'back to established · ' + subject.intervalDays + 'd';
         else detail = 'every ' + subject.intervalDays + 'd';
       }
+      if(r&&row.kind==='technical')detail='Technical check · memory interval unchanged'+(subject.technique?' · follow-up '+subject.technique.nextDue:' · follow-up cleared');
+      else if(r&&r.issue==='technical-slip')detail='One-off technical slip · '+detail;
+      else if(r&&r.issue==='technical-problem')detail='Technical follow-up '+(subject.technique?subject.technique.nextDue:'')+' · '+detail;
+      else if(r&&r.issue==='effort')detail='Needed thought · '+detail;
       if(r&&r.actualMinutes!=null)detail+=(detail?' · ':'')+mins(r.actualMinutes)+' min measured';
       html += '<li><span class="g" data-grade="' + esc(r && r.pct != null ? 'pct' : label) + '">' +
         esc(label) + '</span>' +
@@ -821,7 +840,7 @@
     if (d.state === 'consolidating') html += '<p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; the interval grows after clean reviews.</p>';
     if(d.state==='consolidating'&&d.practiceDifficulty<=2&&!d.sectionFirst){
       var suggestion=A.consolidationSuggestion(A.pieceById(d.id));
-      html += '<p class="small muted">Easy pieces can stay consolidating at two- or three-day intervals. A clean week earns a spacing suggestion; this never marks the piece established. Wobbled holds the interval; Broke down returns an easy consolidating piece to daily checks.</p>';
+      html += '<p class="small muted">Easy consolidating pieces progress through 1, 2, 3, 5, 7, 10 and 14 days. Two secure first attempts across the current gap earn the next step, within the maximum interval. Weekends count. Needed thought holds the interval; a memory wobble returns to a shorter proven gap; a breakdown adds a next-day check. Promotion to established remains your choice.</p>';
       if(suggestion)html += '<button class="btn btn-block" data-action="space-consolidation" data-id="'+esc(d.id)+'">Move to every '+suggestion.intervalDays+' days</button>';
     }
     if (d.state === 'consolidating') html += '<div class="field"><label>Consolidation interval (days)</label>' +
@@ -1033,6 +1052,7 @@
     A.expandRepertoire();
     A.enableDemandPlanning();
     A.refinePracticeRules();
+    A.enablePerformanceSpacing();
       view.minutes = null;
       refresh();
     };
@@ -1053,7 +1073,7 @@
     if (t.classList.contains('grade')) {
       var gradeTop=t.getBoundingClientRect().top;
       if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
-      A.timedGrade(t.getAttribute('data-grade'));
+      A.timedGrade(t.getAttribute('data-grade'),'memory');
       view.pctFor = null;
       renderToday();
       var selectedGrade=document.querySelector('.grade.is-selected');
@@ -1066,6 +1086,7 @@
 
     if (action !== 'save-learning') captureLearningDraft();
     switch (action) {
+      case 'grade-issue': {var it=A.currentItem(),top=t.getBoundingClientRect().top;if(it&&it.result){A.timedGrade(it.result.grade,t.getAttribute('data-issue'));renderToday();var selected=document.querySelector('[data-action="grade-issue"].is-selected');if(selected)window.scrollBy(0,selected.getBoundingClientRect().top-top);}break;}
       case 'use-section-timing': {var si=+t.getAttribute('data-index'),stat=A.timingSummary(d.id,d.sections[si].id);if(stat){d.sections[si].practiceMinutes=Math.max(.25,Math.ceil(stat.minutes*4)/4);renderEditor();}break;}
       case 'space-consolidation': {var id=t.getAttribute('data-id');if(!savePiece(true))break;A.spaceConsolidation(id);closeSheet();refresh();break;}
 

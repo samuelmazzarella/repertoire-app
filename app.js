@@ -216,6 +216,14 @@
     return allowed.indexOf(v) >= 0 ? v : fallback;
   }
 
+  function normalizeTechnique(raw) {
+    if(!raw||!isValidISO(raw.nextDue))return null;
+    return {nextDue:raw.nextDue,lastChecked:isoOrNull(raw.lastChecked),cleanDates:Array.isArray(raw.cleanDates)?raw.cleanDates.filter(isValidISO):[],minutes:Math.max(.25,num(raw.minutes,3))};
+  }
+  function normalizeSpacing(raw) {
+    if(!raw)return null;
+    return {interval:Math.max(1,num(raw.interval,3)),cleanDates:Array.isArray(raw.cleanDates)?raw.cleanDates.filter(isValidISO):[],proven:Array.isArray(raw.proven)?raw.proven.filter(function(n){return Number.isFinite(n)&&n>=1&&n<=60;}):[],resume:raw.resume==null?null:Math.max(1,num(raw.resume,1))};
+  }
   function normalizeSection(raw, index) {
     raw = raw || {};
     return {
@@ -229,6 +237,7 @@
       intervalCapDays: raw.intervalCapDays == null || raw.intervalCapDays === '' ? null : clamp(Math.round(num(raw.intervalCapDays, 14)), 1, 60),
       prompt: oneOf(raw.prompt, ['start', 'transition', 'recover'], 'start'),
       notes: str(raw.notes), enabled: raw.enabled !== false,
+      technique:normalizeTechnique(raw.technique),
       state: oneOf(raw.state, ['consolidating', 'established', 'repair'], 'consolidating'),
       stateSince: isoOrNull(raw.stateSince),
       intervalDays: Math.max(1, Math.round(num(raw.intervalDays, 3))),
@@ -245,7 +254,7 @@
     raw = raw || {};
     var e = {
       date: isoOrNull(raw.date),
-      type: oneOf(raw.type, ['maintenance', 'learning', 'coldcall'], 'maintenance'),
+      type: oneOf(raw.type, ['maintenance', 'learning', 'coldcall', 'technical'], 'maintenance'),
       grade: oneOf(raw.grade, GRADES, null)
     };
     /* Learning sessions record percent complete rather than a grade — the
@@ -253,7 +262,7 @@
      * one that is a third written into the hands. */
     if (raw.pct != null) e.pct = clamp(Math.round(num(raw.pct, 0)), 0, 100);
     if (raw.sectionId) e.sectionId = str(raw.sectionId);
-    ['focus', 'achievement', 'nextFocus', 'stateBefore', 'note', 'updateId'].forEach(function (k) { if (raw[k] != null) e[k] = str(raw[k]); });
+    ['focus', 'achievement', 'nextFocus', 'stateBefore', 'note', 'updateId', 'issue'].forEach(function (k) { if (raw[k] != null) e[k] = str(raw[k]); });
     ['elapsedDays', 'intervalBefore'].forEach(function (k) { if (raw[k] != null) e[k] = num(raw[k], null); });
     if (raw.early != null) e.early = raw.early === true;
     return e;
@@ -285,6 +294,7 @@
       intervalCapDays: raw.intervalCapDays == null || raw.intervalCapDays === '' ? null : clamp(Math.round(num(raw.intervalCapDays, 14)), 1, 60),
       consolidatingIntervalDays: clamp(Math.round(num(raw.consolidatingIntervalDays, 3)), 1, 20),
       consolidationCadenceSince: isoOrNull(raw.consolidationCadenceSince),
+      spacing:normalizeSpacing(raw.spacing),technique:normalizeTechnique(raw.technique),
       focusedMinutes: raw.focusedMinutes == null || raw.focusedMinutes === '' ? null : Math.max(0.5, num(raw.focusedMinutes, 5)),
       state: state,
       intervalDays: raw.intervalDays == null ? null : Math.max(1, Math.round(num(raw.intervalDays, 1))),
@@ -360,6 +370,7 @@
       settings: {
         demandDriven: s.demandDriven === true,
         balancedPlanning: s.balancedPlanning === true,
+        performancePlanning: s.performancePlanning === true,
         learningEnabled: s.learningEnabled !== false,
         learningMinutes: Math.max(1,num(s.learningMinutes,10)),
         targetDailyMinutes: Math.max(0, Math.round(num(s.targetDailyMinutes, d.targetDailyMinutes))),
@@ -400,7 +411,7 @@
       return {
         pieceId: str(it.pieceId),
         sectionId: it.sectionId ? str(it.sectionId) : null,
-        kind: oneOf(it.kind, ['learning', 'maintenance', 'lookahead', 'continuity'], 'maintenance'),
+        kind: oneOf(it.kind, ['learning', 'maintenance', 'lookahead', 'continuity', 'technical'], 'maintenance'),
         title: str(it.title), composer: str(it.composer), sectionLabel: str(it.sectionLabel),
         estMin: num(it.estMin, 0)
       };
@@ -534,7 +545,7 @@
 
   function sectionPassed(p, sec) {
     var grades = sec.history.filter(function (h) {
-      return h.grade && h.date && (!p.sectionsStarted || h.date >= p.sectionsStarted);
+      return h.type!=='technical' && (!h.issue||h.issue==='memory') && h.grade && h.date && (!p.sectionsStarted || h.date >= p.sectionsStarted);
     });
     return !!grades.length && grades[grades.length - 1].grade === 'clean';
   }
@@ -600,19 +611,22 @@
         units.push(unit);
       });
     });
-    return units;
+    return units.map(function(u){
+      if(u.technique&&u.state!=='repair'&&u.technique.nextDue<u.nextDue)return Object.assign({},u,{technicalCheck:true,nextDue:u.technique.nextDue,lastPlayed:u.technique.lastChecked,intervalDays:2,practiceMinutes:u.technique.minutes});
+      return u;
+    });
   }
 
   function reviewItem(unit, kind) {
     return { pieceId: unit.parentPieceId || unit.id, sectionId: unit.sectionId || null,
       piece: unit.parentPieceId ? pieceById(unit.parentPieceId) : unit,
-      kind: kind, estMin: pieceCost(unit) };
+      kind: unit.technicalCheck?'technical':kind, estMin: pieceCost(unit) };
   }
 
   function cleanDatesSinceFailure(p) {
     var dates = [];
     p.history.forEach(function (h) {
-      if (!h.date || (p.stateSince && h.date < p.stateSince)) return;
+      if (!h.date || h.type==='technical' || h.issue==='technical-slip' || h.issue==='technical-problem' || h.issue==='effort' || (p.stateSince && h.date < p.stateSince)) return;
       if (h.grade === 'broke') dates = [];
       else if (h.grade === 'clean' && !h.early && dates.indexOf(h.date) < 0) dates.push(h.date);
     });
@@ -659,19 +673,25 @@
   /* Applies one grade to one piece. Pure with respect to the store — it
    * mutates only the piece it is given, so sim.js can drive it directly.
    * Returns a record of what changed, for the session summary. */
-  function applyGrade(p, grade, today) {
+  function applyGrade(p, grade, today, issue) {
     grade = oneOf(grade, GRADES, 'wobbled');
     today = today || todayISO();
 
+    issue=oneOf(issue,['memory','effort','technical-slip','technical-problem'],'memory');
     var before = { state: p.state, intervalDays: p.intervalDays };
-
+    var hadTechnique=!!p.technique;
     var early = !!(p.nextDue && today < p.nextDue);
     var elapsed = p.lastPlayed ? daysBetween(p.lastPlayed, today) : null;
     p.history.push({ date: today, type: historyType(p.state), grade: grade,
-      elapsedDays: elapsed, intervalBefore: p.intervalDays, early: early, stateBefore: p.state });
+      elapsedDays: elapsed, intervalBefore: p.intervalDays, early: early, stateBefore: p.state, issue:issue });
     p.lastPlayed = today;
 
-    switch (p.state) {
+    if(issue!=='memory') {
+      // A finger slip or effortful success is not a memory lapse.
+      if(issue==='technical-problem')p.technique={nextDue:addDays(today,2),lastChecked:today,cleanDates:[],minutes:Math.min(3,pieceCost(p))};
+      if(issue==='effort'&&p.spacing)p.spacing.cleanDates=[];
+      p.nextDue=addDays(today,p.intervalDays||1);
+    } else switch (p.state) {
       case 'learning':
         /* Daily, fixed slot. Grades are recorded but do not move the
          * schedule — promotion out of learning is manual only. */
@@ -682,7 +702,8 @@
       case 'consolidating':
         /* Fixed 3-day cadence. Does not enter repair: a piece that is not
          * yet established has nothing to fall back to. */
-        if(store.settings.balancedPlanning&&p.practiceDifficulty<=2&&grade==='broke'){p.consolidatingIntervalDays=1;p.consolidationCadenceSince=today;}
+        if(store.settings.balancedPlanning&&!store.settings.performancePlanning&&p.practiceDifficulty<=2&&grade==='broke'){p.consolidatingIntervalDays=1;p.consolidationCadenceSince=today;}
+        if(easySpacing(p))advanceSpacing(p,grade,today,elapsed,hadTechnique);
         p.intervalDays = p.consolidatingIntervalDays || TUNING.consolidatingIntervalDays;
         p.nextDue = addDays(today, p.intervalDays);
         break;
@@ -745,9 +766,11 @@
         break;
     }
 
+    if(issue==='memory'&&grade==='clean'&&hadTechnique)checkTechnique(p,'clean',today,false);
+    if(issue==='memory'&&grade==='broke')p.technique=null;
     return {
       pieceId: p.id,
-      grade: grade,
+      grade: grade, issue:issue,
       from: before,
       to: { state: p.state, intervalDays: p.intervalDays },
       nextDue: p.nextDue,
@@ -798,13 +821,13 @@
       nextFocus: p.learningFocus, enteredRepair: false, leftRepair: false, intervalChanged: false };
   }
 
-  function gradeSection(parent, sec, grade, today) {
+  function gradeSection(parent, sec, grade, today, issue) {
     sec.fragility = sec.fragilityOverride == null ? parent.fragility : sec.fragilityOverride;
-    var ch = applyGrade(sec, grade, today);
+    var ch = applyGrade(sec, grade, today, issue);
     var h = sec.history[sec.history.length - 1];
     h.type = 'coldcall'; h.sectionId = sec.id;
     sec.lastColdCall = today;
-    if (grade === 'broke') {
+    if ((!issue||issue==='memory')&&grade === 'broke') {
       sec.failCount++;
       if (ch.from.state === 'consolidating') {
         sec.preRepairInterval = ch.from.intervalDays;
@@ -812,12 +835,50 @@
         setPieceState(sec, 'repair', today); sec.intervalDays = 1; sec.nextDue = addDays(today, 1);
         ch.enteredRepair = true;
       }
-    } else if (sec.state === 'consolidating' && grade === 'clean' && cleanDatesSinceFailure(sec).length >= 2) {
+    } else if ((!issue||issue==='memory')&&sec.state === 'consolidating' && grade === 'clean' && cleanDatesSinceFailure(sec).length >= 2) {
       setPieceState(sec, 'established', today);
     }
     ch.pieceId = parent.id; ch.sectionId = sec.id;
     ch.to = { state: sec.state, intervalDays: sec.intervalDays }; ch.nextDue = sec.nextDue;
     return ch;
+  }
+
+  function easySpacing(p){return store.settings.performancePlanning&&p.state==='consolidating'&&p.practiceDifficulty!=null&&p.practiceDifficulty<=2&&!p.sectionFirst;}
+  function advanceSpacing(p,grade,today,elapsed,hadTechnique){
+    var current=p.consolidatingIntervalDays||3, ladder=[1,2,3,5,7,10,14];
+    var t=p.spacing;if(!t||t.interval!==current)t=p.spacing={interval:current,cleanDates:[],proven:t?t.proven:[],resume:null};
+    function change(n){t.interval=n;t.cleanDates=[];p.consolidatingIntervalDays=n;}
+    function shorter(){var proven=t.proven.filter(function(n){return n<current;});return proven.length?Math.max.apply(null,proven):(ladder.filter(function(n){return n<current;}).slice(-1)[0]||1);}
+    if(grade==='broke'){var resume=shorter();change(1);t.resume=resume;return;}
+    if(grade==='wobbled'){change(shorter());t.resume=null;return;}
+    if(hadTechnique||elapsed==null||elapsed<current)return;
+    if(t.resume!=null){var resume=t.resume;t.resume=null;change(resume);return;}
+    if(t.cleanDates.indexOf(today)<0)t.cleanDates.push(today);
+    if(t.cleanDates.length<2)return;
+    if(t.proven.indexOf(current)<0)t.proven.push(current);
+    var cap=Math.min(14,appliedCap(p.fragility,p.intervalCapDays));
+    var next=ladder.find(function(n){return n>current&&n<=cap;});
+    if(next)change(next);
+  }
+  function checkTechnique(p,grade,today,record){
+    var t=p.technique;if(!t)return;
+    if(record)p.history.push({date:today,type:'technical',grade:grade,issue:'technical-problem'});
+    if(grade==='clean'){if(t.cleanDates.indexOf(today)<0)t.cleanDates.push(today);}else t.cleanDates=[];
+    t.lastChecked=today;
+    if(t.cleanDates.length>=2)p.technique=null;else t.nextDue=addDays(today,2);
+  }
+  function enablePerformanceSpacing(today){
+    today=today||todayISO();var id='performance-spacing-20261021';
+    if(needsSeed()||store.appliedUpdates.indexOf(id)>=0)return false;
+    store.settings.performancePlanning=true;store.reviewAssignments={};
+    store.pieces.forEach(function(p){
+      if(p.composerId!=='chopin'||['Op. 28 No. 4','Op. 28 No. 6','Op. 28 No. 7','Op. 28 No. 13'].indexOf(p.catalogue)<0||p.state!=='consolidating')return;
+      var last=p.history.filter(function(h){return h.grade&&h.type!=='technical';}).slice(-1)[0];
+      if(last&&last.grade!=='clean')return; // Keep a newer phone failure's schedule.
+      p.consolidatingIntervalDays=3;p.intervalDays=3;p.nextDue=addDays(p.lastPlayed||today,3);
+      p.spacing={interval:3,cleanDates:[],proven:[],resume:null};
+    });
+    store.appliedUpdates.push(id);save();return true;
   }
 
   /* Days spent in learning so far — the raw material for "how long does a
@@ -1069,7 +1130,7 @@
   }
 
   function reviewedOn(subject, today) {
-    return (subject.history || []).some(function (h) { return h.date === today; });
+    return (subject.history || []).some(function (h) { return h.date === today && h.type!=='technical'; });
   }
 
   function orderForWarmup(items) {
@@ -1226,7 +1287,7 @@
         (subject.history || []).forEach(function (h) {
           if (h.date !== date) return;
           rows.push({pieceId:p.id,sectionId:sec?sec.id:null,title:p.title,composer:composerName(p.composerId),section:sec ? sec.label : '',
-            grade:h.grade, type:h.type, detail:h.achievement || h.focus || h.note || '', date:h.date});
+            grade:h.grade, type:h.type, issue:h.issue, detail:h.achievement || h.focus || h.note || '', date:h.date});
         });
       }
       collect(p,null); p.sections.forEach(function (sec) { collect(sec,sec); });
@@ -1240,14 +1301,14 @@
     var measured={};
     store.practiceTimes.filter(function(t){return t.date===date&&t.minutes>0;}).forEach(function(t){
       if(rows.some(function(r){return r.timingId===t.id;}))return;
-      var key=t.pieceId+':'+(t.sectionId||'');
+      var key=t.pieceId+':'+(t.sectionId||'')+':'+(t.kind==='technical'?'technical':'review');
       if(!measured[key])measured[key]={minutes:0,finished:true,sample:t};
       measured[key].minutes+=t.minutes;measured[key].finished=measured[key].finished&&t.finished;
     });
     Object.keys(measured).forEach(function(key){
       var group=measured[key],t=group.sample;
       var detail=(group.minutes<.05?'<0.1':Math.round(group.minutes*10)/10)+' min measured'+(group.finished?'':' · stopped partway');
-      var row=rows.find(function(r){return r.pieceId===t.pieceId&&(r.sectionId||null)===(t.sectionId||null);});
+      var row=rows.find(function(r){return r.pieceId===t.pieceId&&(r.sectionId||null)===(t.sectionId||null)&&(r.type==='technical')===(t.kind==='technical');});
       if(row){row.detail+=(row.detail?' · ':'')+detail;return;}
       var p=pieceById(t.pieceId),sec=p&&t.sectionId?sectionById(p,t.sectionId):null;
       rows.push({pieceId:t.pieceId,title:p?p.title:t.state==='warmup'?'Scale warmup':'Removed piece',composer:p?composerName(p.composerId):'',section:sec?sec.label:'',type:'timed',detail:detail,date:t.date});
@@ -1505,12 +1566,15 @@
       learningFocus: p.learningFocus, learningAchievement: p.learningAchievement,
       lastColdCall: p.lastColdCall, failCount: p.failCount,
       consolidatingIntervalDays:p.consolidatingIntervalDays,consolidationCadenceSince:p.consolidationCadenceSince,
+      technique:p.technique?JSON.parse(JSON.stringify(p.technique)):null,spacing:p.spacing?JSON.parse(JSON.stringify(p.spacing)):null,
       historyLen: p.history.length
     };
   }
 
   function restorePiece(p, snap) {
     if (!snap) return;
+    if(snap.technique!==undefined)p.technique=snap.technique?JSON.parse(JSON.stringify(snap.technique)):null;
+    if(snap.spacing!==undefined)p.spacing=snap.spacing?JSON.parse(JSON.stringify(snap.spacing)):null;
     if(snap.consolidatingIntervalDays!==undefined)p.consolidatingIntervalDays=snap.consolidatingIntervalDays;
     if(snap.consolidationCadenceSince!==undefined)p.consolidationCadenceSince=snap.consolidationCadenceSince;
     p.state = snap.state;
@@ -1567,6 +1631,10 @@
         p.nextDue = addDays(s.date, 1);
         result.pushed = true;
       }
+    } else if(it.kind==='technical'){
+      result.grade=oneOf(payload.grade,GRADES,'wobbled');result.issue='technical-problem';result.technical=true;
+      checkTechnique(it.subject,result.grade,s.date,true);
+      result.change={pieceId:p.id,grade:result.grade,enteredRepair:false,leftRepair:false,intervalChanged:false};
     } else if (!it.section && !p.sectionFirst && (it.kind === 'learning' || p.state === 'learning')) {
       var pr = payload.pct != null ? recordLearningProgress(p, payload.pct, s.date) : recordLearningNote(p, payload, s.date);
       result.skipped = false;
@@ -1580,9 +1648,9 @@
         setPieceState(p, 'consolidating', s.date);
         p.intervalDays = p.consolidatingIntervalDays; p.nextDue = s.date;
       }
-      var ch = it.section ? gradeSection(p, it.section, payload.grade, s.date) : applyGrade(p, payload.grade, s.date);
+      var ch = it.section ? gradeSection(p, it.section, payload.grade, s.date,payload.issue) : applyGrade(p, payload.grade, s.date,payload.issue);
       result.skipped = false;
-      result.grade = ch.grade;
+      result.grade = ch.grade;result.issue=ch.issue;
       result.pct = null;
       result.change = ch;
       result.countedMin = store.settings.demandDriven ? 0 : it.estMin;
@@ -2766,15 +2834,23 @@
     function choices(job,prevDate){
       var u=job.unit,due=dueFor(job,prevDate),interval=job.interval;
       if(job.locked)return [0];
-      var stable=u.state==='established'&&interval>=3&&!learningUnit(u), wiggle=stable?Math.max(1,Math.min(2,Math.floor(interval*.2))):0;
-      var lo=addDays(due,-wiggle),hi=addDays(due,wiggle),prior=job.previous?(prevDate||dates[job.previous.day]):u.lastPlayed;
+      var stable=u.state==='established'&&interval>=3&&!u.technicalCheck&&!learningUnit(u), wiggle=stable?Math.max(1,Math.min(2,Math.floor(interval*.2))):0;
+      var earlyWindow=store.settings.performancePlanning&&stable&&interval>=5&&weekdayOf(due)===1?Math.max(3,wiggle):wiggle;
+      var lo=addDays(due,-earlyWindow),hi=addDays(due,wiggle),prior=job.previous?(prevDate||dates[job.previous.day]):u.lastPlayed;
       if(stable&&prior){var capDate=addDays(prior,appliedCap(u.fragility,u.intervalCapDays));if(hi>capDate)hi=capDate;}
       // A stable review falling on a day off may use the preceding practice
       // day, at most two calendar days early and never on consecutive days
       // for a three-day interval. This avoids a Sunday-to-Monday bottleneck.
       var dueIndex=daysBetween(today,due);
+      // An easy consolidating piece due on Saturday can use Friday rather
+      // than stretch a new three-day gap to five days. Early checks do not
+      // earn longer spacing; the actual elapsed gap decides that.
+      if(store.settings.performancePlanning&&easySpacing(u)&&interval>=2&&dueIndex>=0&&dueIndex<horizon&&!active[dueIndex]){
+        lo=addDays(due,-2);
+        if(prior&&lo<addDays(prior,interval-1))lo=addDays(prior,interval-1);
+      }
       if(stable&&dueIndex>=0&&dueIndex<horizon&&!active[dueIndex])lo=addDays(due,-Math.max(2,wiggle));
-      if(prior){var minDate=addDays(prior,stable?Math.max(2,interval-Math.max(2,wiggle)):1);if(lo<minDate)lo=minDate;}
+      if(prior){var minDate=addDays(prior,stable?Math.max(2,interval-Math.max(2,earlyWindow)):1);if(lo<minDate)lo=minDate;}
       if(!job.previous&&due<today){lo=today;hi=today;}
       var out=[];
       for(var d=0;d<horizon;d++)if(active[d]&&dates[d]>=lo&&dates[d]<=hi&&!(d===0&&started&&due>today))out.push(d);
@@ -2836,6 +2912,31 @@
       });
       if(!changed)break;
     }
+    if(store.settings.performancePlanning){
+      // Move a review and, where needed, its later occurrences together.
+      // No occurrence is discarded and the same date/gap limits still apply.
+      for(var pass=0;pass<2;pass++){
+        var improved=false;
+        movable.forEach(function(job){
+          if(job.locked)return;
+          var originalDays=jobs.map(function(j){return j.day;}),bestDays=null,bestScore=score;
+          choices(job).forEach(function(day){
+            if(day===job.day||!sectionRoom(job,day))return;
+            job.day=day;var next=job.next,valid=true;
+            while(next){
+              var opts=choices(next).filter(function(d){return d>next.previous.day&&sectionRoom(next,d);});
+              if(!opts.length){valid=false;break;}
+              if(opts.indexOf(next.day)<0){opts.sort(function(a,b){return Math.abs(a-next.day)-Math.abs(b-next.day)||a-b;});next.day=opts[0];}
+              next=next.next;
+            }
+            if(valid){var trial=objective();if(trial<bestScore-.01){bestScore=trial;bestDays=jobs.map(function(j){return j.day;});}}
+            jobs.forEach(function(j,i){j.day=originalDays[i];});
+          });
+          if(bestDays){jobs.forEach(function(j,i){j.day=bestDays[i];});score=bestScore;improved=true;}
+        });
+        if(!improved)break;
+      }
+    }
     var sum=totals();
     jobs.forEach(function(j){var due=dueFor(j),it=reviewItem(j.unit,dates[j.day]<due?'lookahead':'maintenance');it.naturalDue=due;it.projected=j.occurrence>0;buckets[j.day].items.push(it);});
     return buckets.slice(0,requestedDays).map(function(b,d){
@@ -2848,6 +2949,7 @@
 
   function consolidationSuggestion(p,today){
     today=today||todayISO();
+    if(store.settings.performancePlanning)return null;
     if(!p||p.state!=='consolidating'||p.practiceDifficulty>2||p.sectionFirst)return null;
     var interval=p.consolidatingIntervalDays||3;if(interval!==1&&interval!==2)return null;
     var since=p.consolidationCadenceSince||p.stateSince||'',clean=[];
@@ -3055,6 +3157,7 @@
     return {date:today,items:items,warmup:warmup,budgetMin:total+allowance,plannedMin:total+allowance,
       demandMin:total-warmup.minutes,allowanceMin:allowance,
       learning:items.filter(function(it){return pieceById(it.pieceId).state==='learning';}),
+      technical:items.filter(function(it){return it.kind==='technical';}),
       maintenance:items.filter(function(it){return pieceById(it.pieceId).state!=='learning'&&it.kind==='maintenance';}),
       lookahead:items.filter(function(it){return it.kind==='lookahead';}),
       continuity:items.filter(function(it){return it.kind==='continuity';}),
@@ -3089,7 +3192,7 @@
     var previous=store.practiceTimes.find(function(x){return x.id===id;});
     var minutes=t.elapsedMs/60000, delta=minutes-(previous?previous.minutes:0);
     var row={id:id,date:(previous&&previous.date)||todayISO(),pieceId:it.pieceId,sectionId:it.sectionId||null,
-      minutes:minutes,state:previous?previous.state:(warmup?'warmup':(pieceById(it.pieceId)||{}).state),finished:t.finished};
+      minutes:minutes,kind:it.kind,state:previous?previous.state:(warmup?'warmup':(pieceById(it.pieceId)||{}).state),finished:t.finished};
     if(previous)Object.assign(previous,row);else if(minutes>0)store.practiceTimes.push(row);
     if(delta)addActualMinutes(row.date,delta);
     var result=!warmup&&s.results[s.index];
@@ -3113,9 +3216,9 @@
     t.elapsedMs=Math.max(0,num(minutes,0))*60000;t.runningSince=null;t.started=true;
     storeTiming(t);save();
   }
-  function timedGrade(grade) {
+  function timedGrade(grade,issue) {
     checkpointTimer(false);
-    return recordAt(store.session.index,{grade:grade});
+    return recordAt(store.session.index,{grade:grade,issue:issue});
   }
   function finishTimedItem(payload) {
     var s=store.session;if(!s)return false;
@@ -3126,7 +3229,7 @@
     advanceFrom(s.index);save();return true;
   }
   function timingSummary(id,sectionId) {
-    var rows=store.practiceTimes.filter(function(x){return x.pieceId===id&&(x.sectionId||null)===(sectionId||null)&&x.finished&&x.minutes>0&&x.state!=='repair'&&x.state!=='learning';});
+    var rows=store.practiceTimes.filter(function(x){return x.pieceId===id&&(x.sectionId||null)===(sectionId||null)&&x.kind!=='technical'&&x.finished&&x.minutes>0&&x.state!=='repair'&&x.state!=='learning';});
     if(rows.length<3)return null;
     var values=rows.slice(-8).map(function(x){return x.minutes;}).sort(function(a,b){return a-b;});
     var mid=Math.floor(values.length/2);
@@ -3164,9 +3267,10 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.4',
+    VERSION: '6.5',
     weekPlan:weekPlan,
     refinePracticeRules:refinePracticeRules,
+    enablePerformanceSpacing:enablePerformanceSpacing,
     consolidationSuggestion:consolidationSuggestion,
     spaceConsolidation:spaceConsolidation,
     timerInfo:timerInfo,

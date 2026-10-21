@@ -677,3 +677,7 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .bar-col{display:grid;grid-template-rows:20px 80px 18px 18px;gap:4px;min-width:0;}
 .bar-wrap{height:80px;min-height:80px;}
 .bar-col>.tiny{white-space:nowrap;font-size:.65rem;}
+
+.outcome-controls {margin:1rem 0;padding:1rem;border:1px solid var(--border);border-radius:12px;}
+.outcome-controls .btn {margin:0 .3rem .5rem 0;}
+.outcome-controls .is-selected {background:#364a51;border:2px solid #82a6b4;color:#fff;}
