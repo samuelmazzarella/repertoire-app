@@ -284,6 +284,7 @@
       maxSectionsPerDay: clamp(Math.round(num(raw.maxSectionsPerDay, 2)), 1, 6),
       intervalCapDays: raw.intervalCapDays == null || raw.intervalCapDays === '' ? null : clamp(Math.round(num(raw.intervalCapDays, 14)), 1, 60),
       consolidatingIntervalDays: clamp(Math.round(num(raw.consolidatingIntervalDays, 3)), 1, 20),
+      consolidationCadenceSince: isoOrNull(raw.consolidationCadenceSince),
       focusedMinutes: raw.focusedMinutes == null || raw.focusedMinutes === '' ? null : Math.max(0.5, num(raw.focusedMinutes, 5)),
       state: state,
       intervalDays: raw.intervalDays == null ? null : Math.max(1, Math.round(num(raw.intervalDays, 1))),
@@ -358,6 +359,7 @@
       version: STATE_VERSION,
       settings: {
         demandDriven: s.demandDriven === true,
+        balancedPlanning: s.balancedPlanning === true,
         learningEnabled: s.learningEnabled !== false,
         learningMinutes: Math.max(1,num(s.learningMinutes,10)),
         targetDailyMinutes: Math.max(0, Math.round(num(s.targetDailyMinutes, d.targetDailyMinutes))),
@@ -680,6 +682,7 @@
       case 'consolidating':
         /* Fixed 3-day cadence. Does not enter repair: a piece that is not
          * yet established has nothing to fall back to. */
+        if(store.settings.balancedPlanning&&p.practiceDifficulty<=2&&grade==='broke'){p.consolidatingIntervalDays=1;p.consolidationCadenceSince=today;}
         p.intervalDays = p.consolidatingIntervalDays || TUNING.consolidatingIntervalDays;
         p.nextDue = addDays(today, p.intervalDays);
         break;
@@ -1501,12 +1504,15 @@
       learnedPct: p.learnedPct,
       learningFocus: p.learningFocus, learningAchievement: p.learningAchievement,
       lastColdCall: p.lastColdCall, failCount: p.failCount,
+      consolidatingIntervalDays:p.consolidatingIntervalDays,consolidationCadenceSince:p.consolidationCadenceSince,
       historyLen: p.history.length
     };
   }
 
   function restorePiece(p, snap) {
     if (!snap) return;
+    if(snap.consolidatingIntervalDays!==undefined)p.consolidatingIntervalDays=snap.consolidatingIntervalDays;
+    if(snap.consolidationCadenceSince!==undefined)p.consolidationCadenceSince=snap.consolidationCadenceSince;
     p.state = snap.state;
     p.intervalDays = snap.intervalDays;
     p.lastPlayed = snap.lastPlayed;
@@ -2739,6 +2745,143 @@
     };
   }
 
+  // Build every recurrence before balancing. Future placements are suggestions,
+  // not persistent commitments; overdue anchors and active sessions prevent drift.
+  function balancedWeekPlan(today, requestedDays, includeToday) {
+    today=today||todayISO();requestedDays=requestedDays||7;
+    var horizon=Math.max(21,requestedDays+7), dates=[],active=[],jobs=[],chains={},buckets=[];
+    var session=store.session,started=practiceLog(today).length>0||!!(session&&session.date===today),locked={};
+    if(session&&session.date===today&&!session.finished)session.plan.forEach(function(it,i){
+      if(!session.results[i])locked[it.pieceId+(it.sectionId?'::'+it.sectionId:'')]=true;
+    });
+    for(var i=0;i<horizon;i++){
+      var date=addDays(today,i);dates.push(date);
+      active.push(!inBreak(date)&&store.settings.skippedDate!==date&&(budgetForDate(date)>0||(i===0&&includeToday)));
+      var learners=active[i]&&store.settings.learningEnabled?learningCandidates(date).slice(0,store.settings.maxLearning):[];
+      buckets.push({date:date,weekday:weekdayOf(date),items:[],learning:learners,baseLearning:learners.length*store.settings.learningMinutes});
+    }
+    var units=reviewUnits().filter(function(u){return MAINTENANCE_STATES.indexOf(u.state)>=0&&u.nextDue&&(!learningUnit(u)||store.settings.learningEnabled);});
+    units.sort(function(a,b){return Number(!(a.sectionId&&!a.lastPlayed))-Number(!(b.sectionId&&!b.lastPlayed))||a.nextDue.localeCompare(b.nextDue)||cmpId(a,b);});
+    function dueFor(job,prevDate){return job.previous?addDays(prevDate||dates[job.previous.day],job.interval):job.unit.nextDue;}
+    function choices(job,prevDate){
+      var u=job.unit,due=dueFor(job,prevDate),interval=job.interval;
+      if(job.locked)return [0];
+      var stable=u.state==='established'&&interval>=3&&!learningUnit(u), wiggle=stable?Math.max(1,Math.min(2,Math.floor(interval*.2))):0;
+      var lo=addDays(due,-wiggle),hi=addDays(due,wiggle),prior=job.previous?(prevDate||dates[job.previous.day]):u.lastPlayed;
+      if(stable&&prior){var capDate=addDays(prior,appliedCap(u.fragility,u.intervalCapDays));if(hi>capDate)hi=capDate;}
+      // A stable review falling on a day off may use the preceding practice
+      // day, at most two calendar days early and never on consecutive days
+      // for a three-day interval. This avoids a Sunday-to-Monday bottleneck.
+      var dueIndex=daysBetween(today,due);
+      if(stable&&dueIndex>=0&&dueIndex<horizon&&!active[dueIndex])lo=addDays(due,-Math.max(2,wiggle));
+      if(prior){var minDate=addDays(prior,stable?Math.max(2,interval-Math.max(2,wiggle)):1);if(lo<minDate)lo=minDate;}
+      if(!job.previous&&due<today){lo=today;hi=today;}
+      var out=[];
+      for(var d=0;d<horizon;d++)if(active[d]&&dates[d]>=lo&&dates[d]<=hi&&!(d===0&&started&&due>today))out.push(d);
+      if(!out.length){
+        // Fixed short checks roll over days off once, not once per missed day.
+        for(var d=0;d<horizon;d++)if(active[d]&&dates[d]>=due&&(!prior||dates[d]>prior)&&!(d===0&&started&&due>today)){out=[d];break;}
+      }
+      return out;
+    }
+    function sectionRoom(job,day){
+      if(!job.unit.sectionId||!job.parent.sectionFirst)return true;
+      var used=jobs.filter(function(x){return x!==job&&x.day===day&&x.unit.sectionId&&x.parent.id===job.parent.id;}).length;
+      return used<(day===0?sectionSlotsLeft(job.parent,today):job.parent.maxSectionsPerDay);
+    }
+    // Establish a complete baseline, including daily checks and section drills.
+    units.forEach(function(u){
+      var previous=null,parent=unitParent(u),chain=[];
+      for(var occurrence=0;occurrence<horizon;occurrence++){
+        var job={unit:u,parent:parent,interval:Math.max(1,u.intervalDays||1),previous:previous,next:null,occurrence:occurrence,
+          locked:occurrence===0&&!!locked[u.id],cost:pieceCost(u),hard:unitDifficulty(u)>=4};
+        var opts=choices(job).filter(function(d){return sectionRoom(job,d);});
+        if(!opts.length&&u.sectionId&&parent.sectionFirst){
+          var due=dueFor(job);for(var d=0;d<horizon;d++)if(active[d]&&dates[d]>=due&&(!previous||d>previous.day)&&sectionRoom(job,d)){opts=[d];break;}
+        }
+        if(!opts.length)break;
+        var due=dueFor(job);opts.sort(function(a,b){return Math.abs(daysBetween(due,dates[a]))-Math.abs(daysBetween(due,dates[b]))||a-b;});
+        job.day=opts[0];if(previous)previous.next=job;previous=job;chain.push(job);jobs.push(job);
+        if(u.sectionFirst&&learningUnit(u)&&!u.sectionId)break;
+      }
+      chains[u.id]=chain;
+    });
+    function totals(){
+      var list=buckets.map(function(b){return {maintenance:0,learning:b.baseLearning,hard:0,hardMinutes:0,count:b.learning.length};});
+      jobs.forEach(function(j){var b=list[j.day];b[learningUnit(j.unit)?'learning':'maintenance']+=j.cost;b.count++;if(j.hard){b.hardMinutes+=j.cost;if(!j.unit.sectionId)b.hard++;}});
+      return list.map(function(b,d){var warmup=b.count&&active[d]&&!(d===0&&practiceLog(today).some(function(r){return r.type==='warmup';}))?store.settings.warmupMinutes:0;var sum=b.maintenance+b.learning+warmup;b.warmup=warmup;b.allowance=b.hardMinutes?sum/9:0;b.total=sum+b.allowance;return b;});
+    }
+    function objective(){
+      var t=totals(),score=0;
+      t.forEach(function(b){score+=b.total*b.total+35*Math.pow(Math.max(0,b.hard-2),2)+.15*b.hardMinutes*b.hardMinutes;});
+      jobs.forEach(function(j){score+=2*Math.pow(daysBetween(dueFor(j),dates[j.day]),2);});
+      return score;
+    }
+    // Coordinate descent over the complete workload. Check both adjacent
+    // occurrences when moving a review, preserving its recurrence spacing.
+    var score=objective();
+    var movable=jobs.slice().sort(function(a,b){return b.cost-a.cost||Number(b.hard)-Number(a.hard)||a.day-b.day;});
+    for(var pass=0;pass<10;pass++){
+      var changed=false;
+      movable.forEach(function(job){
+        if(job.locked)return;
+        var original=job.day,best=original,bestScore=score;
+        choices(job).forEach(function(day){
+          if(day===original||!sectionRoom(job,day))return;
+          if(job.previous&&day<=job.previous.day)return;
+          if(job.next&&(day>=job.next.day||choices(job.next,dates[day]).indexOf(job.next.day)<0))return;
+          job.day=day;var trial=objective();if(trial<bestScore-.01){best=day;bestScore=trial;}job.day=original;
+        });
+        job.day=best;if(best!==original){score=bestScore;changed=true;}
+      });
+      if(!changed)break;
+    }
+    var sum=totals();
+    jobs.forEach(function(j){var due=dueFor(j),it=reviewItem(j.unit,dates[j.day]<due?'lookahead':'maintenance');it.naturalDue=due;it.projected=j.occurrence>0;buckets[j.day].items.push(it);});
+    return buckets.slice(0,requestedDays).map(function(b,d){
+      b.learning.forEach(function(p){b.items.push({pieceId:p.id,piece:p,kind:'learning',estMin:store.settings.learningMinutes});});
+      return {date:b.date,weekday:b.weekday,items:orderForPractice(b.items),maintenanceMin:sum[d].maintenance,learningMin:sum[d].learning,
+        hardCount:sum[d].hard,hardMinutes:sum[d].hardMinutes,warmupMin:sum[d].warmup,allowanceMin:sum[d].allowance,projectedMin:sum[d].total,
+        practiceDay:active[d],budget:0,over:false,overBy:0};
+    });
+  }
+
+  function consolidationSuggestion(p,today){
+    today=today||todayISO();
+    if(!p||p.state!=='consolidating'||p.practiceDifficulty>2||p.sectionFirst)return null;
+    var interval=p.consolidatingIntervalDays||3;if(interval!==1&&interval!==2)return null;
+    var since=p.consolidationCadenceSince||p.stateSince||'',clean=[];
+    p.history.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date));}).forEach(function(h){
+      if(!h.date||h.date<since||h.date>today||!h.grade)return;
+      if(h.grade!=='clean'){clean=[];return;}
+      if(!h.early&&h.intervalBefore===interval&&clean.indexOf(h.date)<0)clean.push(h.date);
+    });
+    var start=interval===2&&p.consolidationCadenceSince?p.consolidationCadenceSince:clean[0];
+    if(clean.length<(interval===1?5:3)||!start||daysBetween(start,clean[clean.length-1])<7)return null;
+    return {intervalDays:interval+1,cleanChecks:clean.length};
+  }
+  function spaceConsolidation(id,today){
+    today=today||todayISO();var p=pieceById(id),suggestion=consolidationSuggestion(p,today);if(!suggestion)return false;
+    updatePiece(id,{consolidatingIntervalDays:suggestion.intervalDays},today);p.consolidationCadenceSince=today;save();return true;
+  }
+  function refinePracticeRules(today){
+    today=today||todayISO();var id='balanced-weeks-20261021';
+    if(needsSeed()||store.appliedUpdates.indexOf(id)>=0)return false;
+    store.settings.balancedPlanning=true;store.reviewAssignments={};
+    var drillNames=['F major scale','C major scale','E major scale','B-dim arpeggio','Chromatic thirds'];
+    store.pieces.forEach(function(p){
+      if(p.composerId!=='chopin')return;
+      if(p.catalogue==='Op. 28 No. 24')p.sections.forEach(function(s){if(drillNames.indexOf(s.label)>=0)s.practiceMinutes=1;});
+      if(['Op. 28 No. 4','Op. 28 No. 6','Op. 28 No. 7'].indexOf(p.catalogue)>=0&&p.state==='consolidating'&&p.consolidatingIntervalDays===1){
+        // Re-evaluate the phone's current history; a later wobble or breakdown
+        // must not be overwritten by the older backup used during development.
+        if(consolidationSuggestion(p,today)){p.consolidatingIntervalDays=2;p.intervalDays=2;p.nextDue=addDays(p.lastPlayed||today,2);p.consolidationCadenceSince=today;}
+      }
+    });
+    if(store.session)store.session.plan.forEach(function(it,i){if(store.session.results[i])return;var p=pieceById(it.pieceId),s=p&&it.sectionId?sectionById(p,it.sectionId):null;if(s)it.estMin=pieceCost(s);});
+    store.appliedUpdates.push(id);save();return true;
+  }
+
   // Demand-led planning. Saved dates pin a review within its window so simply
   // reopening the app cannot keep pushing the same review into the future.
   function unitKey(unit, due) { return unit.id + '@' + due; }
@@ -2753,6 +2896,7 @@
     return pieceCost(unit);
   }
   function weekPlan(today, days, includeToday) {
+    if(store.settings.balancedPlanning)return balancedWeekPlan(today,days,includeToday);
     today = today || todayISO(); days = days || 7;
     var end = addDays(today, days - 1), buckets = {}, jobs = [];
     for (var i=0;i<days;i++) {
@@ -3020,8 +3164,11 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.3',
+    VERSION: '6.4',
     weekPlan:weekPlan,
+    refinePracticeRules:refinePracticeRules,
+    consolidationSuggestion:consolidationSuggestion,
+    spaceConsolidation:spaceConsolidation,
     timerInfo:timerInfo,
     ensureTimer:ensureTimer,
     startTimer:startTimer,

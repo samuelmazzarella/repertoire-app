@@ -9,7 +9,7 @@
  * indefinitely, with no error to tell you why.
  */
 
-var CACHE_VERSION = 'v63-weekly-timer-20261020-release';
+var CACHE_VERSION = 'v64-balanced-weeks-20261021b';
 var CACHE = 'repertoire-' + CACHE_VERSION;
 
 var ASSETS = [

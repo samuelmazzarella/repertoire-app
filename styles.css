@@ -666,3 +666,14 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 
 .practice-timer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 0;margin:8px 0;border-top:1px solid var(--line,#ddd)}
 .practice-timer b{font-variant-numeric:tabular-nums;font-size:1.7rem;min-width:5ch}
+
+/* Explicit grade selection: colour, outline, checkmark, and aria-pressed. */
+.grade.is-selected{outline:2px solid currentColor;outline-offset:-2px;font-weight:700;}
+.grade[data-grade="clean"].is-selected{background:rgba(110,176,125,.22);}
+.grade[data-grade="wobbled"].is-selected{background:rgba(203,178,93,.22);}
+.grade[data-grade="broke"].is-selected{background:rgba(195,116,110,.22);}
+/* Equal plot height; labels no longer consume the height of the bars. */
+.bars{height:150px;align-items:stretch;}
+.bar-col{display:grid;grid-template-rows:20px 80px 18px 18px;gap:4px;min-width:0;}
+.bar-wrap{height:80px;min-height:80px;}
+.bar-col>.tiny{white-space:nowrap;font-size:.65rem;}

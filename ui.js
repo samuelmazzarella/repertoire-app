@@ -111,6 +111,7 @@
     A.updatePracticePreferences();
     A.expandRepertoire();
     A.enableDemandPlanning();
+    A.refinePracticeRules();
     A.subscribe(renderSaveStatus);
     renderSaveStatus();
     view.booted = true;
@@ -409,7 +410,7 @@
     var max=Math.max(1,...forecast.map(function(d){return d.projectedMin;}));
     return '<section class="card forecast"><h2>Week ahead</h2><div class="bars">'+forecast.map(function(d,i){
       return '<div class="bar-col'+(i===0?' is-today':'')+'"><span class="tiny">'+mins(d.projectedMin)+'</span><div class="bar-wrap"><span class="bar'+(!d.practiceDay?' is-zero-day':'')+'" style="height:'+Math.max(2,Math.round(d.projectedMin/max*100))+'%"></span></div><span class="bar-label">'+DAYS_SHORT[d.weekday]+'</span><span class="tiny muted">'+(d.hardCount?d.hardCount+' hard':'')+'</span></div>';
-    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Assumes reviews go ahead at their current intervals. Stable reviews can move by up to two days; repair and frequent checks stay close to their due dates. Hard counts are whole pieces; section work is included in the minutes.</p></section>';
+    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Balanced across the coming weeks using current review intervals. Future plans adjust after practice; repair and frequent checks stay close to their due dates. Hard counts are whole pieces; section work is included in the minutes.</p></section>';
   }
 
   function timerText(ms) {var seconds=Math.floor(ms/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
@@ -491,7 +492,7 @@
     html += '</div>';
 
     if (it.result) {
-      html += '<p class="recorded-note">' +
+      html += '<p class="recorded-note" aria-live="polite">' +
         (it.result.skipped ? 'Skipped' + (it.result.pushed ? ' — due tomorrow' : ' — still due')
           : it.result.learning ? 'Practice recorded'
           : it.result.pct != null ? 'Learning recorded'
@@ -509,9 +510,10 @@
       html += renderLearningControl(p, it);
     } else {
       html += '<button class="btn btn-primary btn-block" data-action="done-item"'+(!it.result||it.result.skipped?' disabled':'')+'>Done — next</button>' + '<div class="grades">' +
-        '<button class="grade" data-grade="clean">Clean</button>' +
-        '<button class="grade" data-grade="wobbled">Wobbled</button>' +
-        '<button class="grade" data-grade="broke">Broke down</button>' +
+        [['clean','Clean'],['wobbled','Wobbled'],['broke','Broke down']].map(function(choice){
+          var selected=!!it.result&&it.result.grade===choice[0]&&!it.result.skipped;
+          return '<button class="grade'+(selected?' is-selected':'')+'" data-grade="'+choice[0]+'" aria-label="'+choice[1]+'" aria-pressed="'+selected+'">'+(selected?'<span aria-hidden="true">✓ </span>':'')+choice[1]+'</button>';
+        }).join('') +
         '</div><p class="small muted">Grade your first attempt, then keep practising. Tap Done when you finish this piece or section.</p>' + gradeHelp();
     }
 
@@ -608,6 +610,7 @@
         ' deferred today (' + mins(sum.deferredMin) + ' min). They stay due and rank higher next time.</p></div>';
     }
 
+    sum.rows.forEach(function(row){var suggestion=A.consolidationSuggestion(row.piece,today);if(suggestion)html+='<p class="small">'+esc(row.piece.title)+' has earned a longer consolidation interval.</p><button class="btn btn-block" data-action="review-spacing" data-id="'+esc(row.piece.id)+'">Review spacing</button>';});
     var nextDay=A.weekPlan(today,8,false).find(function(d){return d.date>today&&d.items.length;});
     if(nextDay)html += '<section class="card"><h2>Next practice day</h2><p>'+esc(longDate(nextDay.date))+' · '+mins(nextDay.projectedMin)+' min estimated</p></section>';
 
@@ -816,6 +819,11 @@
     }
 
     if (d.state === 'consolidating') html += '<p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; the interval grows after clean reviews.</p>';
+    if(d.state==='consolidating'&&d.practiceDifficulty<=2&&!d.sectionFirst){
+      var suggestion=A.consolidationSuggestion(A.pieceById(d.id));
+      html += '<p class="small muted">Easy pieces can stay consolidating at two- or three-day intervals. A clean week earns a spacing suggestion; this never marks the piece established. Wobbled holds the interval; Broke down returns an easy consolidating piece to daily checks.</p>';
+      if(suggestion)html += '<button class="btn btn-block" data-action="space-consolidation" data-id="'+esc(d.id)+'">Move to every '+suggestion.intervalDays+' days</button>';
+    }
     if (d.state === 'consolidating') html += '<div class="field"><label>Consolidation interval (days)</label>' +
       '<input type="number" min="1" max="20" data-field="consolidatingIntervalDays" value="' + (d.consolidatingIntervalDays || 3) + '"></div>';
     if (d.state === 'consolidating' || d.state === 'repair') html += '<div class="field"><label>Focused practice (minutes; blank = usual estimate)</label>' +
@@ -849,6 +857,7 @@
           '" data-section="' + i + '" data-section-field="' + field + '" value="' +
           esc(sec[field] == null ? '' : sec[field]) + '" ' + (extra || '') + '></div>';
       }
+      var measuredSection=A.timingSummary(d.id,sec.id);
       html += '<details class="section-editor" data-section-id="' + esc(sec.id) + '"><summary>' + esc(sec.label || 'New section') +
         ' <span class="tiny muted">' + (sec.enabled === false ? 'paused' : esc(sec.state || 'consolidating')) + '</span></summary>' +
         input('label', 'Name / landmark') +
@@ -861,6 +870,7 @@
         input('fragilityOverride', 'Fragility (blank = piece)', 'number', 'min="1" max="5" step="0.5"') + '</div>' +
         '<div class="field-row">' + input('practiceDifficulty', 'Playing difficulty (1–5; blank = piece)', 'number', 'min="1" max="5"') +
         input('practiceMinutes', 'Practice time (min; blank = usual estimate)', 'number', 'min="0.25" step="0.25"') + '</div>' +
+        (measuredSection?'<p class="small muted">Typical measured practice: '+mins(measuredSection.minutes)+' min (median of '+measuredSection.sessions+' completed sessions).</p><button class="btn btn-sm" data-action="use-section-timing" data-index="'+i+'">Use measured allowance</button>':'') +
         input('intervalCapDays', 'Maximum interval (days; blank = fragility default)', 'number', 'min="1" max="60"') +
         input('notes', 'Practice note') +
         '<div class="field-row">' + input('intervalDays', 'Interval (days)', 'number', 'min="1"') + input('nextDue', 'Next due', 'date') + '</div>' +
@@ -1022,6 +1032,7 @@
     A.updatePracticePreferences();
     A.expandRepertoire();
     A.enableDemandPlanning();
+    A.refinePracticeRules();
       view.minutes = null;
       refresh();
     };
@@ -1040,11 +1051,13 @@
     if (tab) { A.pauseTimer(); captureLearningDraft(); view.tab = tab; refresh(); return; }
 
     if (t.classList.contains('grade')) {
+      var gradeTop=t.getBoundingClientRect().top;
       if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
       A.timedGrade(t.getAttribute('data-grade'));
       view.pctFor = null;
       renderToday();
-      window.scrollTo(0, 0);
+      var selectedGrade=document.querySelector('.grade.is-selected');
+      if(selectedGrade)window.scrollBy(0,selectedGrade.getBoundingClientRect().top-gradeTop);
       return;
     }
 
@@ -1053,6 +1066,9 @@
 
     if (action !== 'save-learning') captureLearningDraft();
     switch (action) {
+      case 'use-section-timing': {var si=+t.getAttribute('data-index'),stat=A.timingSummary(d.id,d.sections[si].id);if(stat){d.sections[si].practiceMinutes=Math.max(.25,Math.ceil(stat.minutes*4)/4);renderEditor();}break;}
+      case 'space-consolidation': {var id=t.getAttribute('data-id');if(!savePiece(true))break;A.spaceConsolidation(id);closeSheet();refresh();break;}
+
       case 'toggle-timer': if(A.timerInfo().running)A.pauseTimer();else A.startTimer();renderToday();break;
       case 'adjust-timer': {A.pauseTimer();var value=prompt('Practice minutes (excluding breaks):',mins(A.timerInfo().milliseconds/60000));if(value!==null&&value.trim()!==''&&Number.isFinite(+value)&&+value>=0)A.adjustTimer(+value);renderToday();break;}
       case 'done-item': A.finishTimedItem();refresh();window.scrollTo(0,0);break;
@@ -1188,6 +1204,7 @@
         renderRepertoire();
         break;
       }
+      case 'review-spacing': openEditor(t.getAttribute('data-id')); break;
       case 'edit-piece': openEditor(t.getAttribute('data-id')); break;
       case 'add-piece': openEditor(null); break;
       case 'close-sheet': closeSheet(); break;
