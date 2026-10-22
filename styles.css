@@ -681,3 +681,18 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .outcome-controls {margin:1rem 0;padding:1rem;border:1px solid var(--border);border-radius:12px;}
 .outcome-controls .btn {margin:0 .3rem .5rem 0;}
 .outcome-controls .is-selected {background:#364a51;border:2px solid #82a6b4;color:#fff;}
+
+/* v6.6 */
+.timer-label { margin-top: 16px; color: var(--muted); font-size: .85rem; }
+.timer-options, .advanced-settings { margin: 12px 0 20px; }
+.timer-options summary, .advanced-settings summary { color: var(--muted); cursor: pointer; padding: 8px 0; }
+.timer-options select { margin: 8px 0; }
+.log-date-row { display: flex; align-items: center; gap: 8px; }
+.log-date-row input { flex: 1; min-width: 0; width: auto; }
+.log-entry h2 { margin-top: 12px; font-size: 1rem; }
+.log-entry p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.today-record { padding-left: 18px; }
+.today-record li { margin: 8px 0; }
+.suggestion { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.suggestion h3 { font-size: 1rem; }
+.return-notice { border-left: 3px solid var(--accent); padding-left: 12px; font-size: .9rem; }

@@ -9,7 +9,7 @@
  * indefinitely, with no error to tell you why.
  */
 
-var CACHE_VERSION = 'v65-performance-spacing-20261021c';
+var CACHE_VERSION = 'v66-practice-log-20261022b';
 var CACHE = 'repertoire-' + CACHE_VERSION;
 
 var ASSETS = [
@@ -28,20 +28,15 @@ var ASSETS = [
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE)
-      /* Individually, so one missing optional file cannot fail the whole
-         install and leave the app with no cache at all.
-
-         cache:'reload' is load-bearing, not a nicety. cache.add() and
-         cache.addAll() go through the browser's ordinary HTTP cache, so on a
-         site whose filenames never change they will happily copy the STALE
-         response into a brand-new cache — and bumping CACHE_VERSION does
-         nothing at all. Forcing a network fetch is what makes the version
-         bump mean something. */
+      /* Fetch a complete release before activating. A missing asset leaves
+         the previous offline release available; local practice data is separate. */
       .then(function (c) {
         return Promise.all(ASSETS.map(function (url) {
           return fetch(new Request(url, { cache: 'reload' }))
-            .then(function (res) { if (res && res.ok) return c.put(url, res); })
-            .catch(function () { /* optional file, skip */ });
+            .then(function (res) {
+              if (!res || !res.ok) throw new Error('Incomplete app update: ' + url);
+              return c.put(url, res);
+            });
         }));
       })
       .then(function () { return self.skipWaiting(); })

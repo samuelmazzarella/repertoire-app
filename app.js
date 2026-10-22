@@ -216,6 +216,9 @@
     return allowed.indexOf(v) >= 0 ? v : fallback;
   }
 
+  function normalizeAllowances(raw) {
+    var out={}; Object.keys(raw||{}).forEach(function(k){if(['maintenance','section','repair','technical','performance'].indexOf(k)>=0 && Number.isFinite(raw[k]) && raw[k]>0)out[k]=raw[k];});return out;
+  }
   function normalizeTechnique(raw) {
     if(!raw||!isValidISO(raw.nextDue))return null;
     return {nextDue:raw.nextDue,lastChecked:isoOrNull(raw.lastChecked),cleanDates:Array.isArray(raw.cleanDates)?raw.cleanDates.filter(isValidISO):[],minutes:Math.max(.25,num(raw.minutes,3))};
@@ -232,6 +235,8 @@
       endBar: raw.endBar == null || raw.endBar === '' ? null : Math.max(1, num(raw.endBar, 1)),
       fragilityOverride: raw.fragilityOverride == null || raw.fragilityOverride === '' ? null : clamp(num(raw.fragilityOverride, 3), 1, 5),
       durationMin: Math.max(0.25, num(raw.durationMin, 1)),
+      allowances: normalizeAllowances(raw.allowances),
+      suggestionDismissals: raw.suggestionDismissals && typeof raw.suggestionDismissals==='object' ? raw.suggestionDismissals : {},
       practiceMinutes: raw.practiceMinutes == null || raw.practiceMinutes === '' ? null : Math.max(0.25, num(raw.practiceMinutes, 1)),
       practiceDifficulty: raw.practiceDifficulty == null || raw.practiceDifficulty === '' ? null : clamp(num(raw.practiceDifficulty, 3), 1, 5),
       intervalCapDays: raw.intervalCapDays == null || raw.intervalCapDays === '' ? null : clamp(Math.round(num(raw.intervalCapDays, 14)), 1, 60),
@@ -264,6 +269,11 @@
     if (raw.sectionId) e.sectionId = str(raw.sectionId);
     ['focus', 'achievement', 'nextFocus', 'stateBefore', 'note', 'updateId', 'issue'].forEach(function (k) { if (raw[k] != null) e[k] = str(raw[k]); });
     ['elapsedDays', 'intervalBefore'].forEach(function (k) { if (raw[k] != null) e[k] = num(raw[k], null); });
+    ['recordId','timingId','purpose'].forEach(function(k){if(raw[k])e[k]=str(raw[k]);});
+    if(raw.logBefore)e.logBefore=raw.logBefore;
+    if(raw.logAfter)e.logAfter=str(raw.logAfter);
+    if(raw.logConfig)e.logConfig=str(raw.logConfig);
+    if(raw.corrections)e.corrections=raw.corrections;
     if (raw.early != null) e.early = raw.early === true;
     return e;
   }
@@ -282,6 +292,8 @@
       contentMin: Math.max(0.1, num(raw.contentMin, duration)),
       fragility: clamp(num(raw.fragility, 3), 1, 5),
       practiceDifficulty: clamp(num(raw.practiceDifficulty, num(raw.fragility, 3)), 1, 5),
+      allowances: normalizeAllowances(raw.allowances),
+      suggestionDismissals: raw.suggestionDismissals && typeof raw.suggestionDismissals==='object' ? raw.suggestionDismissals : {},
       practiceMinutes: raw.practiceMinutes == null || raw.practiceMinutes === '' ? null : Math.max(.25,num(raw.practiceMinutes,1)),
       priorKnowledge: oneOf(raw.priorKnowledge, ['new', 'played', 'near'], 'new'),
       tags: Array.isArray(raw.tags) ? raw.tags.map(function (t) { return str(t); }).filter(Boolean) : [],
@@ -382,6 +394,7 @@
         lastExportDate: isoOrNull(s.lastExportDate),
         onBreak: s.onBreak === true,
         breakSince: isoOrNull(s.breakSince),
+        returnPlan: s.returnPlan && isValidISO(s.returnPlan.start) ? s.returnPlan : null,
         breaks: Array.isArray(s.breaks) ? s.breaks.filter(function (b) { return isoOrNull(b.start); }) : [],
         skippedDate: isoOrNull(s.skippedDate),
         warmupMinutes: clamp(num(s.warmupMinutes, 2), 0, 5),
@@ -442,7 +455,7 @@
       startedAt: isoOrNull(raw.startedAt),
       finished: raw.finished === true,
       paused: raw.paused === true,
-      timers: raw.timers && typeof raw.timers === 'object' ? Object.fromEntries(Object.entries(raw.timers).filter(function(pair){return /^(\d+|warmup)$/.test(pair[0])&&pair[1];}).map(function(pair){var t=pair[1];return [pair[0],{elapsedMs:Math.max(0,num(t.elapsedMs,0)),runningSince:null,checkpoint:null,started:t.started===true,finished:t.finished===true}];})) : {},
+      timers: raw.timers && typeof raw.timers === 'object' ? Object.fromEntries(Object.entries(raw.timers).filter(function(pair){return /^(\d+|warmup)$/.test(pair[0])&&pair[1];}).map(function(pair){var t=pair[1];return [pair[0],{elapsedMs:Math.max(0,num(t.elapsedMs,0)),runningSince:null,checkpoint:null,started:t.started===true,finished:t.finished===true,manualStart:t.manualStart===true,purpose:t.purpose||null}];})) : {},
       learningDraft: raw.learningDraft && typeof raw.learningDraft === 'object' ? raw.learningDraft : null
     };
   }
@@ -633,7 +646,10 @@
     return dates;
   }
 
-  function pieceCost(p) {
+  function pieceCost(p, purpose) {
+    purpose=purpose||(p.technicalCheck?'technical':p.state==='repair'?'repair':(p.sectionId||p.label)?'section':'maintenance');
+    if(p.allowances && p.allowances[purpose])return p.allowances[purpose];
+    if(purpose==='performance')return p.durationMin;
     if (p.practiceMinutes) return p.practiceMinutes;
     if ((p.state === 'repair' || p.state === 'consolidating') && p.focusedMinutes) return p.focusedMinutes;
     var difficulty=p.practiceDifficulty==null?(p.inheritedDifficulty==null?p.fragility:p.inheritedDifficulty):p.practiceDifficulty;
@@ -1274,7 +1290,7 @@
       return true;
     }
     var it = {pieceId:p.id,piece:p,kind:p.state === 'learning' ? 'learning' : 'continuity',
-      estMin:p.state === 'learning' ? (store.settings.demandDriven?store.settings.learningMinutes:TUNING.learningSlotMin) : pieceCost(p)};
+      estMin:p.state === 'learning' ? (store.settings.demandDriven?store.settings.learningMinutes:TUNING.learningSlotMin) : pieceCost(p,'performance')};
     createSession({items:[it],budgetMin:it.estMin,plannedMin:it.estMin,demandMin:it.estMin},today,'manual');
     return true;
   }
@@ -1335,7 +1351,9 @@
       store.settings.breakSince = null; store.settings.skippedDate = null;
       store.settings.capacityWatch = {overSince:null,nudgedFor:null};
     }
-    store.settings.onBreak = on; save();
+    store.settings.onBreak = on;
+    if(!on)prepareReturnPlan(today,true);
+    save();
   }
 
   /* Fits a session to `minutes`. Does not mutate state. */
@@ -1615,7 +1633,7 @@
     if (it.piece.sectionFirst && it.piece.state === 'learning' && !it.section && !sectionProgress(it.piece).ready) return null;
     clearResultAt(i);                       // re-recording never stacks
     var p = it.piece;
-    var snap = snapshotPiece(it.subject);
+    var snap = snapshotPiece(it.subject), taskPurpose=currentPurposeFor(it.kind,it.piece,it.section);
     var result = { date: s.date, pieceId: p.id, sectionId: it.section ? it.section.id : null, snapshot: snap, countedMin: 0 };
 
     if (payload.skip) {
@@ -1659,7 +1677,12 @@
     if (!payload.skip) store.settings.lastSessionDate = s.date;
     if (result.countedMin) addActualMinutes(s.date, result.countedMin);
     if(store.settings.demandDriven)result.finished=!!payload.skip;
+    if(!payload.skip){
+      var h=it.subject.history[it.subject.history.length-1];
+      if(h){h.recordId=s.id+':'+i;h.timingId=h.recordId;h.purpose=s.timers&&s.timers[i]&&s.timers[i].purpose||taskPurpose;h.logBefore=JSON.parse(JSON.stringify(snap));h.logAfter=scheduleSignature(it.subject);h.logConfig=logConfiguration(it.subject);}
+    }
     s.results[i] = result;
+    trimLogSnapshots(it.subject);
     save();
     return result;
   }
@@ -1759,7 +1782,7 @@
       s.index = s.results.findIndex(function (r) { return !r || r.finished===false; });
       if (s.index < 0) s.index = s.plan.length;
     }
-    if(store.settings.demandDriven)startTimer();
+    // Returning to an item waits for an explicit Start or Resume tap.
     save(); return s;
   }
 
@@ -1782,7 +1805,7 @@
     for (var i = 0; i < s.plan.length; i++) {
       if (s.plan[i].pieceId !== pieceId || s.results[i]) continue;
       var subject = s.plan[i].sectionId ? sectionById(p, s.plan[i].sectionId) : p;
-      if (subject) s.plan[i].estMin = s.plan[i].kind === 'learning' ? (store.settings.demandDriven?store.settings.learningMinutes:TUNING.learningSlotMin) : pieceCost(subject);
+      if (subject) s.plan[i].estMin = s.plan[i].kind === 'learning' ? (store.settings.demandDriven?store.settings.learningMinutes:TUNING.learningSlotMin) : pieceCost(subject,s.plan[i].kind==='continuity'?'performance':s.plan[i].kind==='technical'?'technical':undefined);
     }
     save();
   }
@@ -2469,6 +2492,7 @@
     ['composerId', 'title', 'catalogue', 'notes', 'priorKnowledge', 'learningFocus', 'learningAchievement'].forEach(function (k) {
       if (fields[k] != null) p[k] = str(fields[k]);
     });
+    if(fields.allowances!==undefined)p.allowances=normalizeAllowances(fields.allowances);
     if(fields.practiceMinutes !== undefined)p.practiceMinutes=fields.practiceMinutes===''||fields.practiceMinutes==null?null:Math.max(.25,num(fields.practiceMinutes,1));
     if (fields.practiceDifficulty != null) p.practiceDifficulty = clamp(num(fields.practiceDifficulty,3),1,5);
     if (fields.tier != null) p.tier = clamp(Math.round(num(fields.tier, p.tier)), 0, 3);
@@ -2790,6 +2814,7 @@
       dropped = true;
     }
 
+    prepareReturnPlan(today,false);
     var nudge = store.settings.onBreak ? null : capacityNudge(today);     // mutates capacityWatch
     if(store.settings.demandDriven)weekPlan(today,7,false);
     if (nudge || dropped || store.settings.demandDriven) save();
@@ -2851,7 +2876,14 @@
       }
       if(stable&&dueIndex>=0&&dueIndex<horizon&&!active[dueIndex])lo=addDays(due,-Math.max(2,wiggle));
       if(prior){var minDate=addDays(prior,stable?Math.max(2,interval-Math.max(2,earlyWindow)):1);if(lo<minDate)lo=minDate;}
-      if(!job.previous&&due<today){lo=today;hi=today;}
+      if(!job.previous){
+        var returning=returnDate(u,today);
+        if(returning){lo=returning<today?today:returning;hi=lo;
+          var rp=store.settings.returnPlan,ra=rp.assignments[u.id];
+          if(rp.planning){lo=today;hi=ra.latest;}
+        }
+        else if(due<today){lo=today;hi=today;}
+      }
       var out=[];
       for(var d=0;d<horizon;d++)if(active[d]&&dates[d]>=lo&&dates[d]<=hi&&!(d===0&&started&&due>today))out.push(d);
       if(!out.length){
@@ -2890,7 +2922,7 @@
     function objective(){
       var t=totals(),score=0;
       t.forEach(function(b){score+=b.total*b.total+35*Math.pow(Math.max(0,b.hard-2),2)+.15*b.hardMinutes*b.hardMinutes;});
-      jobs.forEach(function(j){score+=2*Math.pow(daysBetween(dueFor(j),dates[j.day]),2);});
+      jobs.forEach(function(j){var due=dueFor(j);if(!j.previous&&store.settings.returnPlan&&store.settings.returnPlan.planning&&returnDate(j.unit,today))due=today;score+=2*Math.pow(daysBetween(due,dates[j.day]),2);});
       return score;
     }
     // Coordinate descent over the complete workload. Check both adjacent
@@ -3147,7 +3179,7 @@
         return MAINTENANCE_STATES.indexOf(p.state)>=0 && p.state!=='repair' && !reviewedOn(p,today) &&
           !items.some(function(it){return it.pieceId===p.id&&!it.sectionId;});
       }).sort(function(a,b){return String(a.lastPlayed||'').localeCompare(String(b.lastPlayed||''))||cmpId(a,b);})[0];
-      if(next)items.push({pieceId:next.id,piece:next,kind:'continuity',estMin:pieceCost(next)});
+      if(next)items.push({pieceId:next.id,piece:next,kind:'continuity',estMin:pieceCost(next,'performance')});
     }
     items=orderForPractice(items);
     var warmup=warmupForDate(today,practiceLog(today).some(function(r){return r.type==='warmup';})?0:store.settings.warmupMinutes);
@@ -3165,6 +3197,188 @@
       deferred:[],deferredCount:0,deferredMin:0,learningYielded:0,excessLearners:0};
   }
 
+  // v6.6: measurements describe a task, not each repetition within it.
+  var PURPOSES=['maintenance','section','repair','technical','performance','learning','warmup'];
+  function currentPurposeFor(kind,p,sec){
+    return kind==='technical'?'technical':kind==='learning'?'learning':kind==='continuity'?'performance':(sec||p).state==='repair'?'repair':sec?'section':'maintenance';
+  }
+  function currentPurpose(){
+    var s=store.session;if(!s)return 'maintenance';
+    if(s.warmup&&s.warmup.status==='pending')return 'warmup';
+    var it=currentItem();return it?currentPurposeFor(it.kind,it.piece,it.section):'maintenance';
+  }
+  function changeTimingPurpose(purpose){
+    if(PURPOSES.indexOf(purpose)<0)return false;
+    checkpointTimer(true);var t=currentTimer(true);if(!t||t.finished)return false;
+    t.purpose=purpose;
+    var s=store.session,id=s.id+':'+(s.warmup&&s.warmup.status==='pending'?'warmup':s.index);
+    var row=store.practiceTimes.find(function(r){return r.id===id;});if(row)row.purpose=purpose;
+    storeTiming(t);save();return true;
+  }
+  function subjectFor(id,sectionId){var p=pieceById(id);return p&&(sectionId?sectionById(p,sectionId):p);}
+  function allSubjects(fn){store.pieces.forEach(function(p){fn(p,p,null);p.sections.filter(function(s){return s.enabled;}).forEach(function(s){fn(s,p,s.id);});});}
+  function intervalSuggestion(subject,today){
+    if(!subject||subject.state!=='established'||subject.technique)return null;
+    var cap=appliedCap(subject.fragility,subject.intervalCapDays);
+    if(cap>=60||subject.intervalDays<cap)return null;
+    var dates=[];
+    subject.history.filter(function(h){return h.date<=today&&h.type!=='technical'&&h.grade;}).slice().sort(function(a,b){return a.date.localeCompare(b.date);}).forEach(function(h){
+      if(h.issue==='technical-slip'||h.issue==='technical-problem')return;
+      if(h.grade!=='clean'||h.issue==='effort'){dates=[];return;}
+      if(h.intervalBefore>=cap&&h.elapsedDays>=cap&&dates.indexOf(h.date)<0)dates.push(h.date);
+    });
+    if(dates.length<6)return null;
+    return {from:cap,to:Math.min(60,cap+Math.max(1,Math.min(3,Math.round(cap*.2)))),checks:dates.length,last:dates[dates.length-1]};
+  }
+  function practiceSuggestions(today){
+    today=today||todayISO();var out=[];
+    allSubjects(function(subject,p,sectionId){
+      if(!isScheduled(p)||(!sectionId&&p.sectionFirst&&p.state==='learning'))return;
+      if(store.session&&!store.session.finished&&store.session.plan.some(function(it){return it.pieceId===p.id;}))return;
+      var label=p.title+(sectionId?' — '+subject.label:'');
+      var gap=intervalSuggestion(subject,today);
+      if(gap)out.push({type:'interval',pieceId:p.id,sectionId:sectionId,label:label,from:gap.from,to:gap.to,checks:gap.checks,key:'interval:'+gap.from+':'+gap.last});
+      ['maintenance','section','repair','technical','performance'].forEach(function(purpose){
+        if(sectionId&&purpose==='maintenance'||!sectionId&&purpose==='section')return;
+        var stat=timingSummary(p.id,sectionId,purpose);if(!stat)return;
+        var typical=Math.max(.25,Math.ceil(stat.minutes*4)/4),estimate=pieceCost(subject,purpose);
+        if(Math.abs(typical-estimate)<Math.max(.25,estimate*.15))return;
+        out.push({type:'timing',pieceId:p.id,sectionId:sectionId,label:label,purpose:purpose,from:estimate,to:typical,checks:stat.sessions,key:'timing:'+purpose+':'+stat.last});
+      });
+    });
+    return out.filter(function(s){var p=subjectFor(s.pieceId,s.sectionId);return !(p.suggestionDismissals||{})[s.key];});
+  }
+  function respondToSuggestion(pieceId,sectionId,key,accept,today){
+    today=today||todayISO();var s=practiceSuggestions(today).find(function(x){return x.pieceId===pieceId&&(x.sectionId||null)===(sectionId||null)&&x.key===key;});
+    if(!s)return false;var subject=subjectFor(pieceId,sectionId);
+    if(accept){
+      if(s.type==='timing'){subject.allowances=subject.allowances||{};subject.allowances[s.purpose]=s.to;}
+      else{subject.intervalCapDays=s.to;subject.intervalDays=s.to;if(subject.nextDue>=today)subject.nextDue=addDays(subject.lastPlayed||today,s.to);}
+    }
+    subject.suggestionDismissals=subject.suggestionDismissals||{};subject.suggestionDismissals[key]=true;
+    refreshPlanEstimate(pieceId);save();return true;
+  }
+
+  // A return plan pins first checks for one week; reopening cannot postpone them.
+  function prepareReturnPlan(today,explicit){
+    if(store.settings.onBreak)return false;
+    var last=store.settings.lastSessionDate,old=store.settings.returnPlan;
+    if(!last||daysBetween(last,today)<7||old&&old.sourceLast===last)return false;
+    var days=[];for(var i=0;i<21&&days.length<5;i++){var d=addDays(today,i);if(!inBreak(d)&&store.settings.skippedDate!==d&&budgetForDate(d)>0)days.push(d);}
+    if(!days.length)return false;
+    var units=reviewUnits().filter(function(u){return u.nextDue&&u.nextDue<today;});
+    if(!units.length)return false;
+    var loads=days.map(function(){return 0;}),hard=days.map(function(){return 0;}),assignments={};
+    function urgency(u){return u.state==='repair'||u.technicalCheck?0:u.state==='consolidating'?1:2;}
+    units.sort(function(a,b){return urgency(a)-urgency(b)||pieceCost(b)-pieceCost(a)||cmpId(a,b);});
+    units.forEach(function(u){
+      var limit=Math.min(days.length,urgency(u)===0?2:urgency(u)===1?3:5),best=0,isHard=(u.practiceDifficulty||u.inheritedDifficulty||3)>=4;
+      for(var i=1;i<limit;i++)if(loads[i]+(isHard?hard[i]*4:0)+i<loads[best]+(isHard?hard[best]*4:0)+best)best=i;
+      assignments[u.id]={date:days[best],latest:days[limit-1],due:u.nextDue,lastPlayed:u.lastPlayed||null};loads[best]+=pieceCost(u);if(isHard)hard[best]++;
+    });
+    store.settings.returnPlan={start:today,end:days[days.length-1],sourceLast:last,assignments:assignments,planning:true};
+    // Include ordinary due work, future recurrences, learning and hard-piece load.
+    balancedWeekPlan(today,daysBetween(today,days[days.length-1])+1,false).forEach(function(day){day.items.forEach(function(it){var key=it.pieceId+(it.sectionId?'::'+it.sectionId:'');if(!it.projected&&assignments[key])assignments[key].date=day.date;});});
+    delete store.settings.returnPlan.planning;save();return true;
+  }
+  function returnDate(unit,today){
+    var plan=store.settings.returnPlan,a=plan&&plan.assignments&&plan.assignments[unit.id];
+    if(!plan||today>plan.end||!a||a.due!==unit.nextDue||a.lastPlayed!==(unit.lastPlayed||null))return null;
+    return a.date;
+  }
+
+  // History edits replay only an unbroken chain of recorded scheduling snapshots.
+  // Older entries remain editable as records, without guessing an old schedule.
+  function trimLogSnapshots(subject){
+    // Keep recent undo baselines bounded; never discard a practice record.
+    subject.history.slice(0,-12).forEach(function(h){delete h.logBefore;delete h.logAfter;delete h.logConfig;});
+  }
+  function signatureFromSnapshot(snap){var copy=Object.assign({},snap);delete copy.historyLen;return JSON.stringify(copy);}
+  function scheduleSignature(subject){return signatureFromSnapshot(snapshotPiece(subject));}
+  function logConfiguration(subject){return JSON.stringify([subject.fragility,subject.intervalCapDays,subject.practiceDifficulty,subject.sectionFirst||false]);}
+  function logEntries(date){
+    var out=[];
+    store.pieces.forEach(function(p){[null].concat(p.sections).forEach(function(sec){var subject=sec||p;
+      subject.history.forEach(function(h,index){if(h.date!==date)return;
+        var timing=h.timingId&&store.practiceTimes.find(function(t){return t.id===h.timingId;});
+        out.push({key:p.id+'|'+(sec?sec.id:'')+'|'+index,pieceId:p.id,sectionId:sec?sec.id:null,index:index,title:p.title,section:sec?sec.label:'',composer:composerName(p.composerId),history:h,timing:timing||null});
+      });
+    });});return out;
+  }
+  function logTarget(key){var parts=key.split('|'),p=pieceById(parts[0]),sec=p&&parts[1]?sectionById(p,parts[1]):null,subject=sec||p,index=Number(parts[2]);return subject&&subject.history[index]?{p:p,sec:sec,subject:subject,index:index,h:subject.history[index]}:null;}
+  function canReplayLog(key){
+    var t=logTarget(key);if(!t)return false;
+    var tail=t.subject.history.slice(t.index);
+    if(store.session&&!store.session.finished&&store.session.plan.some(function(it){return it.pieceId===t.p.id;}))return false;
+    if(!tail.every(function(h){return h.grade&&h.logBefore&&h.logAfter&&h.logConfig===logConfiguration(t.subject);}))return false;
+    for(var i=1;i<tail.length;i++)if(signatureFromSnapshot(tail[i].logBefore)!==tail[i-1].logAfter)return false;
+    return scheduleSignature(t.subject)===tail[tail.length-1].logAfter;
+  }
+  function updateLogEntry(key,fields){
+    var t=logTarget(key);if(!t)return false;
+    var grade=fields.grade==null?t.h.grade:oneOf(fields.grade,GRADES,t.h.grade),issue=oneOf(fields.issue,['memory','effort','technical-slip','technical-problem'],t.h.issue||'memory');
+    if(grade!=='clean'&&issue==='effort')issue='memory';
+    if(grade==='clean'&&(issue==='technical-slip'||issue==='technical-problem'))issue='memory';
+    if(t.h.type==='technical')issue='technical-problem';
+    var changed=grade!==t.h.grade||issue!==(t.h.issue||'memory'),replay=changed&&canReplayLog(key);
+    var before={grade:t.h.grade,issue:t.h.issue||'memory',note:t.h.note||'',correctedAt:todayISO()};
+    t.h.corrections=(t.h.corrections||[]).concat([before]);t.h.grade=grade;t.h.issue=issue;t.h.note=str(fields.note,t.h.note||'');
+    if(replay){
+      var tail=JSON.parse(JSON.stringify(t.subject.history.slice(t.index))),snapshot=tail[0].logBefore;
+      restorePiece(t.subject,snapshot);
+      tail.forEach(function(old){
+        var snap=snapshotPiece(t.subject),len=t.subject.history.length;
+        if(old.type==='technical')checkTechnique(t.subject,old.grade,old.date,true);
+        else if(t.sec)gradeSection(t.p,t.sec,old.grade,old.date,old.issue);
+        else {if(t.p.sectionFirst&&t.p.state==='learning'){setPieceState(t.p,'consolidating',old.date);t.p.intervalDays=t.p.consolidatingIntervalDays;t.p.nextDue=old.date;}applyGrade(t.p,old.grade,old.date,old.issue);}
+        if(t.subject.history.length===len)t.subject.history.push(Object.assign({},old));
+        var h=t.subject.history[t.subject.history.length-1];
+        ['recordId','timingId','purpose','note','corrections'].forEach(function(k){if(old[k]!=null)h[k]=old[k];});
+        h.logBefore=JSON.parse(JSON.stringify(snap));h.logAfter=scheduleSignature(t.subject);h.logConfig=logConfiguration(t.subject);
+        updateArchivedResult(h);
+      });
+    }else updateArchivedResult(t.h);
+    if(fields.minutes!=null&&t.h.timingId)updateLoggedTime(t.h.timingId,fields.minutes,fields.excludeEstimate);
+    save();return {replayed:replay,recordOnly:changed&&!replay};
+  }
+  function updateArchivedResult(h){
+    if(!h.recordId)return;
+    store.sessionArchive.concat(store.session?[store.session]:[]).forEach(function(s){s.results.forEach(function(r,i){if(r&&s.id+':'+i===h.recordId){r.grade=h.grade;r.issue=h.issue;r.locked=true;delete r.snapshot;}});});
+  }
+  function updateLoggedTime(id,minutes,excludeEstimate){
+    var t=store.practiceTimes.find(function(x){return x.id===id;});
+    if(!t||!Number.isFinite(minutes)||minutes<0)return false;
+    addActualMinutes(t.date,minutes-t.minutes);t.minutes=minutes;t.excludeEstimate=!!excludeEstimate;
+    store.sessionArchive.concat(store.session?[store.session]:[]).forEach(function(s){Object.keys(s.timers||{}).forEach(function(k){if(s.id+':'+k===id){s.timers[k].elapsedMs=minutes*60000;s.timers[k].runningSince=null;}});s.results.forEach(function(r,i){if(r&&s.id+':'+i===id)r.actualMinutes=minutes;});});save();return true;
+  }
+  function addLogEntry(fields,today){
+    today=today||todayISO();var p=pieceById(fields.pieceId),sec=p&&fields.sectionId?sectionById(p,fields.sectionId):null,subject=sec||p;
+    if(!p||(fields.sectionId&&!sec)||!isValidISO(fields.date)||fields.date>today)return false;
+    var date=fields.date,purpose=oneOf(fields.purpose,PURPOSES,sec?'section':'maintenance'),grade=oneOf(fields.grade,GRADES,null);
+    if(purpose!=='learning'&&!grade)return false;
+    var snap=snapshotPiece(subject),id='log-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+    var latest=subject.history.every(function(h){return !h.date||h.date<date;})&&(!subject.lastPlayed||subject.lastPlayed<date);
+    var active=store.session&&!store.session.finished&&store.session.plan.some(function(it){return it.pieceId===p.id;});
+    var update=fields.updateSchedule===true&&latest&&!active&&isScheduled(p)&&purpose!=='learning'&&purpose!=='technical'&&!(p.sectionFirst&&p.state==='learning'&&!sec);
+    var issue=oneOf(fields.issue,['memory','effort','technical-slip','technical-problem'],'memory');
+    if(grade!=='clean'&&issue==='effort')issue='memory';if(grade==='clean'&&(issue==='technical-slip'||issue==='technical-problem'))issue='memory';
+    if(update){if(sec)gradeSection(p,sec,grade,date,issue);else applyGrade(p,grade,date,issue);}
+    else subject.history.push({date:date,type:purpose==='learning'?'learning':purpose==='technical'?'technical':sec?'coldcall':'maintenance',grade:purpose==='learning'?null:grade,issue:issue});
+    var h=subject.history[subject.history.length-1];h.note=str(fields.note);h.recordId=id;h.purpose=purpose;
+    if(update){h.logBefore=JSON.parse(JSON.stringify(snap));h.logAfter=scheduleSignature(subject);h.logConfig=logConfiguration(subject);}
+    if(fields.minutes!=null&&Number.isFinite(fields.minutes)&&fields.minutes>=0){h.timingId=id;store.practiceTimes.push({id:id,date:date,pieceId:p.id,sectionId:sec?sec.id:null,kind:purpose==='technical'?'technical':'maintenance',purpose:purpose,state:subject.state,minutes:fields.minutes,manualStart:false,finished:true});addActualMinutes(date,fields.minutes);}
+    if(!update){
+      // Inserting older evidence changes history indexes; old undo baselines
+      // must not truncate or reorder those records later.
+      subject.history.sort(function(a,b){return String(a.date).localeCompare(String(b.date));});
+      subject.history.forEach(function(h){delete h.logBefore;delete h.logAfter;delete h.logConfig;});
+      if(active)store.session.results.forEach(function(r){if(r&&r.pieceId===p.id&&(r.sectionId||null)===(sec?sec.id:null)){r.locked=true;delete r.snapshot;}});
+    }
+    trimLogSnapshots(subject);
+    if(!store.settings.lastSessionDate||date>store.settings.lastSessionDate)store.settings.lastSessionDate=date;
+    save();return {scheduleUpdated:update};
+  }
+
   // Timers use elapsed wall time, never the number of interval callbacks.
   // Checkpoints bound recovery after a process is killed. Reopening never
   // counts the period while the app was closed.
@@ -3176,13 +3390,13 @@
     if(!warmup&&s.index>=s.plan.length)return null;
     if(!s.timers)s.timers={};
     var key=warmup?'warmup':String(s.index);
-    if(!s.timers[key]&&create)s.timers[key]={elapsedMs:0,runningSince:null,checkpoint:null,started:false,finished:false};
+    if(!s.timers[key]&&create)s.timers[key]={elapsedMs:0,runningSince:null,checkpoint:null,started:false,finished:false,purpose:currentPurpose()};
     return s.timers[key]||null;
   }
   function elapsedTimer(t) {return t?Math.max(0,t.elapsedMs+(t.runningSince==null?0:Math.max(0,timerClock()-t.runningSince))):0;}
   function timerInfo() {
     var t=currentTimer(false);
-    return {milliseconds:elapsedTimer(t),running:!!t&&t.runningSince!=null,started:!!t&&t.started,finished:!!t&&t.finished};
+    return {purpose:t&&t.purpose||currentPurpose(),milliseconds:elapsedTimer(t),running:!!t&&t.runningSince!=null,started:!!t&&t.started,finished:!!t&&t.finished};
   }
   function storeTiming(t) {
     var s=store.session;if(!s||!t)return;
@@ -3190,10 +3404,13 @@
     if(!it)return;
     var id=s.id+':'+(warmup?'warmup':s.index);
     var previous=store.practiceTimes.find(function(x){return x.id===id;});
+    if(!t.started)return;
     var minutes=t.elapsedMs/60000, delta=minutes-(previous?previous.minutes:0);
-    var row={id:id,date:(previous&&previous.date)||todayISO(),pieceId:it.pieceId,sectionId:it.sectionId||null,
+    var row={id:id,purpose:previous&&previous.purpose||t.purpose||currentPurpose(),manualStart:previous?previous.manualStart:t.manualStart===true,date:(previous&&previous.date)||todayISO(),pieceId:it.pieceId,sectionId:it.sectionId||null,
       minutes:minutes,kind:it.kind,state:previous?previous.state:(warmup?'warmup':(pieceById(it.pieceId)||{}).state),finished:t.finished};
     if(previous)Object.assign(previous,row);else if(minutes>0)store.practiceTimes.push(row);
+    var subject=it.pieceId&&subjectFor(it.pieceId,it.sectionId),h=subject&&subject.history.find(function(h){return h.timingId===id;});
+    if(h)h.purpose=row.purpose;
     if(delta)addActualMinutes(row.date,delta);
     var result=!warmup&&s.results[s.index];
     if(result){result.actualMinutes=minutes;result.timingId=id;}
@@ -3207,13 +3424,13 @@
   function startTimer() {
     var s=store.session,t=currentTimer(true);
     if(!t||s.paused||t.finished)return false;
-    if(t.runningSince==null){t.runningSince=timerClock();t.checkpoint=timerClock();t.started=true;save();}
+    if(t.runningSince==null){t.runningSince=timerClock();t.checkpoint=timerClock();if(!t.started)t.manualStart=true;t.started=true;if(!t.purpose)t.purpose=currentPurpose();save();}
     return true;
   }
-  function ensureTimer() {var t=currentTimer(true);if(t&&!t.started)startTimer();}
+  function ensureTimer() {currentTimer(true);}
   function adjustTimer(minutes) {
     var t=currentTimer(true);if(!t)return;
-    t.elapsedMs=Math.max(0,num(minutes,0))*60000;t.runningSince=null;t.started=true;
+    t.elapsedMs=Math.max(0,num(minutes,0))*60000;t.runningSince=null;t.started=true;t.manualStart=true;if(!t.purpose)t.purpose=currentPurpose();
     storeTiming(t);save();
   }
   function timedGrade(grade,issue) {
@@ -3228,12 +3445,15 @@
     var t=currentTimer(true);t.finished=true;storeTiming(t);r.finished=true;
     advanceFrom(s.index);save();return true;
   }
-  function timingSummary(id,sectionId) {
-    var rows=store.practiceTimes.filter(function(x){return x.pieceId===id&&(x.sectionId||null)===(sectionId||null)&&x.kind!=='technical'&&x.finished&&x.minutes>0&&x.state!=='repair'&&x.state!=='learning';});
+  function timingSummary(id,sectionId,purpose) {
+    purpose=purpose||(sectionId?'section':'maintenance');
+    var rows=store.practiceTimes.filter(function(x){return x.pieceId===id&&(x.sectionId||null)===(sectionId||null)&&x.manualStart===true&&x.purpose===purpose&&x.finished&&x.minutes>0&&!x.excludeEstimate;}).slice(-12);
+    if(purpose==='learning'||rows.length<3)return null;
+    var median=function(values){values.sort(function(a,b){return a-b;});var m=Math.floor(values.length/2);return values.length%2?values[m]:(values[m-1]+values[m])/2;};
+    var centre=median(rows.map(function(x){return x.minutes;}));
+    rows=rows.filter(function(x){return x.minutes>=centre/3&&x.minutes<=centre*3;}).slice(-8);
     if(rows.length<3)return null;
-    var values=rows.slice(-8).map(function(x){return x.minutes;}).sort(function(a,b){return a-b;});
-    var mid=Math.floor(values.length/2);
-    return {minutes:values.length%2?values[mid]:(values[mid-1]+values[mid])/2,sessions:values.length};
+    return {minutes:median(rows.map(function(x){return x.minutes;})),sessions:rows.length,last:rows[rows.length-1].id,purpose:purpose};
   }
   function enableDemandPlanning() {
     var id='demand-timer-20261020';
@@ -3250,7 +3470,7 @@
     if(store.session)store.session.plan.forEach(function(it,i){
       if(store.session.results[i])return;
       var p=pieceById(it.pieceId),subject=p&&(it.sectionId?sectionById(p,it.sectionId):p);
-      if(subject)it.estMin=it.kind==='learning'?store.settings.learningMinutes:pieceCost(subject);
+      if(subject)it.estMin=it.kind==='learning'?store.settings.learningMinutes:pieceCost(subject,it.kind==='continuity'?'performance':it.kind==='technical'?'technical':undefined);
     });
     if(store.session){
       var session=store.session,slots=[];
@@ -3267,7 +3487,9 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.5',
+    VERSION: '6.6',
+    PURPOSES:PURPOSES,changeTimingPurpose:changeTimingPurpose,practiceSuggestions:practiceSuggestions,respondToSuggestion:respondToSuggestion,
+    prepareReturnPlan:prepareReturnPlan,logEntries:logEntries,canReplayLog:canReplayLog,updateLogEntry:updateLogEntry,updateLoggedTime:updateLoggedTime,addLogEntry:addLogEntry,
     weekPlan:weekPlan,
     refinePracticeRules:refinePracticeRules,
     enablePerformanceSpacing:enablePerformanceSpacing,

@@ -73,11 +73,69 @@
     if (p.nextDue && p.state !== 'learning') bits.push(dueLabel(p, today));
     if(p.technique)bits.push('technical follow-up '+p.technique.nextDue);
     bits.push(mins(p.durationMin) + ' min');
-    bits.push('fragility ' + p.fragility);
+    
     return bits;
   }
 
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+
+  var PURPOSE_LABELS={maintenance:'Maintenance',section:'Section practice',repair:'Repair',technical:'Technical check',performance:'Full play-through',learning:'Learning',warmup:'Warmup'};
+  function purposeOptions(value,excludeWarmup){return A.PURPOSES.filter(function(x){return !excludeWarmup||x!=='warmup';}).map(function(x){return '<option value="'+x+'"'+(x===value?' selected':'')+'>'+PURPOSE_LABELS[x]+'</option>';}).join('');}
+  function resultLabel(h){return h.type==='learning'&&!h.grade?'Learning':h.issue==='technical-slip'?'Technical slip':h.issue==='technical-problem'&&h.type!=='technical'?'Technical problem':h.issue==='effort'?'Needed thought':h.grade==='clean'?'Clean':h.grade==='wobbled'?'Wobbled':h.grade==='broke'?'Broke down':'Recorded';}
+  function renderLog(){
+    var date=view.logDate||A.todayISO(),entries=A.logEntries(date),rows=A.practiceLog(date),times=A.state().practiceTimes.filter(function(t){return t.date===date;});
+    var html='<div class="row-between"><h1>Log</h1><button class="btn btn-sm" data-action="add-log">Add practice</button></div>'+
+      '<div class="log-date-row"><button class="btn" data-action="log-prev" aria-label="Previous day">←</button><input aria-label="Log date" id="log-date" type="date" max="'+A.todayISO()+'" value="'+esc(date)+'"><button class="btn" data-action="log-next" aria-label="Next day"'+(date>=A.todayISO()?' disabled':'')+'>→</button></div>'+
+      '<p class="small muted">'+esc(longDate(date))+' · '+mins(times.reduce(function(n,t){return n+t.minutes;},0))+' min recorded</p>';
+    if(date!==A.todayISO())html+='<button class="btn btn-sm btn-quiet" data-action="log-today">Today</button>';
+    if(!entries.length&&!rows.length)html+='<p class="empty-state">No practice recorded.</p>';
+    entries.forEach(function(e){var h=e.history;html+='<article class="card log-entry"><div class="row-between"><b>'+esc(resultLabel(h))+'</b><button class="btn btn-sm" data-action="edit-log" data-key="'+esc(e.key)+'">Edit</button></div><h2>'+esc(e.title+(e.section?' — '+e.section:''))+'</h2><p class="small muted">'+esc(e.composer)+' · '+esc(PURPOSE_LABELS[e.timing?e.timing.purpose:h.purpose]|| (e.section?'Section practice':h.type==='technical'?'Technical check':h.type==='learning'?'Learning':'Review'))+(e.timing?' · '+mins(e.timing.minutes)+' min':'')+'</p>'+(h.note||h.achievement||h.focus?'<p>'+esc(h.note||h.achievement||h.focus)+'</p>':'')+'</article>';});
+    // Older backups lack links between individual grades and timers. Keep their
+    // time records separate rather than guessing which grade they belong to.
+    times.filter(function(t){return !entries.some(function(e){return e.timing&&e.timing.id===t.id;});}).forEach(function(t){var p=A.pieceById(t.pieceId),sec=p&&t.sectionId?A.sectionById(p,t.sectionId):null;html+='<article class="card log-entry"><b>'+esc(p?p.title+(sec?' — '+sec.label:''):'Scale warmup')+'</b><p class="small muted">'+mins(t.minutes)+' min · '+esc(PURPOSE_LABELS[t.purpose]||'Recorded time')+(t.finished?'':' · stopped partway')+'</p><button class="btn btn-sm" data-action="edit-log-time" data-id="'+esc(t.id)+'">Correct time</button></article>';});
+    rows.filter(function(r){return r.type==='warmup'&&!r.timingId;}).forEach(function(r){html+='<article class="card"><b>'+esc(r.title)+'</b><p>'+esc(r.detail)+'</p></article>';});
+    el('screen-log').innerHTML=html;
+  }
+  function gradeFields(h){return '<div class="field"><label for="log-grade">Result</label><select id="log-grade">'+[['clean','Clean'],['wobbled','Wobbled'],['broke','Broke down']].map(function(x){return '<option value="'+x[0]+'"'+(h.grade===x[0]?' selected':'')+'>'+x[1]+'</option>';}).join('')+'</select></div><div class="field" id="log-issue-field"><label for="log-issue">Recall / cause</label><select id="log-issue">'+[['memory','Memory'],['effort','Needed thought'],['technical-slip','One-off technical slip'],['technical-problem','Recurring technical problem']].map(function(x){return '<option value="'+x[0]+'"'+((h.issue||'memory')===x[0]?' selected':'')+'>'+x[1]+'</option>';}).join('')+'</select></div>';}
+  function syncLogGradeOptions(){
+    var grade=el('log-grade'),issue=el('log-issue');if(!grade||!issue)return;
+    Array.from(issue.options).forEach(function(o){o.hidden=grade.value==='clean'?(o.value==='technical-slip'||o.value==='technical-problem'):o.value==='effort';});
+    if(issue.selectedOptions[0].hidden)issue.value='memory';
+  }
+  function openLogEditor(key){
+    var row=A.logEntries(view.logDate||A.todayISO()).find(function(e){return e.key===key;});if(!row)return;
+    view.logEdit=key;var h=row.history,replay=A.canReplayLog(key);
+    openSheet('<h2>'+esc(row.title+(row.section?' — '+row.section:''))+'</h2><p class="small">'+esc(longDate(h.date))+'</p>'+(h.grade?gradeFields(h):'')+
+      (h.grade?'<p class="small muted">'+(replay?'Changing this result will recalculate this item’s later reviews.':'This changes the historical record only. Its old schedule cannot be reconstructed safely, or a session is still open. Current review dates stay unchanged.')+'</p>':'')+
+      '<div class="field"><label for="log-note">Note</label><textarea id="log-note">'+esc(h.note||h.achievement||h.focus||'')+'</textarea></div>'+
+      (row.timing?'<div class="field"><label for="log-minutes">Practice minutes</label><input id="log-minutes" type="number" min="0" step="any" value="'+mins(row.timing.minutes)+'"></div><label class="check-label"><input id="log-exclude" type="checkbox"'+(row.timing.excludeEstimate?' checked':'')+'> Exclude this time from estimates</label>':'')+
+      '<button class="btn btn-primary btn-block" data-action="save-log">Save correction</button><button class="btn btn-quiet btn-block" data-action="close-sheet">Cancel</button>');
+    syncLogGradeOptions();if(h.type==='technical'){el('log-issue-field').hidden=true;el('log-issue').value='technical-problem';}
+  }
+  function openAddLog(){
+    view.logEdit=null;var pieces=A.state().pieces.slice().sort(function(a,b){return (A.composerName(a.composerId)+' '+a.title).localeCompare(A.composerName(b.composerId)+' '+b.title);});
+    openSheet('<h2>Add practice</h2><div class="field"><label for="new-log-date">Date</label><input id="new-log-date" type="date" max="'+A.todayISO()+'" value="'+(view.logDate||A.todayISO())+'"></div><div class="field"><label for="new-log-piece">Piece</label><select id="new-log-piece">'+pieces.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(A.composerName(p.composerId)+' — '+p.title)+'</option>';}).join('')+'</select></div><div class="field"><label for="new-log-section">Whole piece or section</label><select id="new-log-section"></select></div><div class="field"><label for="new-log-purpose">Practice type</label><select id="new-log-purpose">'+purposeOptions('maintenance',true)+'</select></div><div id="new-log-results">'+gradeFields({grade:'clean'})+'</div><div class="field"><label for="log-minutes">Minutes (optional)</label><input id="log-minutes" type="number" min="0" step="any"></div><div class="field"><label for="log-note">Note</label><textarea id="log-note"></textarea></div><label class="check-label"><input type="checkbox" id="new-log-schedule"> Also update its review schedule</label><p class="tiny muted" id="new-log-schedule-help">Only available for the latest review, with no open session for this piece. Older entries are records only.</p><button class="btn btn-primary btn-block" data-action="save-new-log">Add practice</button><button class="btn btn-quiet btn-block" data-action="close-sheet">Cancel</button>');
+    fillLogSections();syncLogGradeOptions();
+  }
+  function fillLogSections(){var p=A.pieceById(el('new-log-piece').value);el('new-log-section').innerHTML='<option value="">Whole piece</option>'+p.sections.map(function(s){return '<option value="'+esc(s.id)+'">'+esc(s.label)+'</option>';}).join('');syncNewLog();}
+  function syncNewLog(){
+    var p=A.pieceById(el('new-log-piece').value),sid=el('new-log-section').value,subject=sid?A.sectionById(p,sid):p,purpose=el('new-log-purpose').value,date=el('new-log-date').value;
+    var learning=purpose==='learning',technical=purpose==='technical';el('new-log-results').hidden=learning;el('log-issue-field').hidden=technical;
+    if(technical)el('log-issue').value='technical-problem';else syncLogGradeOptions();
+    var active=A.state().session,eligible=!learning&&!technical&&p.state!=='backlog'&&!(p.sectionFirst&&p.state==='learning'&&!sid)&&(!subject.lastPlayed||subject.lastPlayed<date)&&subject.history.every(function(h){return h.date<date;})&&!(active&&!active.finished&&active.plan.some(function(it){return it.pieceId===p.id;}));
+    el('new-log-schedule').disabled=!eligible;if(!eligible)el('new-log-schedule').checked=false;
+  }
+  function openTimeEditor(id){
+    var t=A.state().practiceTimes.find(function(x){return x.id===id;});if(!t)return;view.timeEdit=id;
+    openSheet('<h2>Correct recorded time</h2><div class="field"><label for="log-minutes">Practice minutes</label><input type="number" id="log-minutes" min="0" step="any" value="'+mins(t.minutes)+'"></div><label class="check-label"><input id="log-exclude" type="checkbox"'+(t.excludeEstimate?' checked':'')+'> Exclude this time from estimates</label><button class="btn btn-primary btn-block" data-action="save-log-time">Save</button><button class="btn btn-quiet btn-block" data-action="close-sheet">Cancel</button>');
+  }
+  function openSuggestions(){
+    var list=A.practiceSuggestions();view.suggestions=list;
+    var html='<h2>Practice suggestions</h2><p class="small muted">Nothing changes until you choose Apply.</p>';
+    if(!list.length)html+='<p>No changes suggested yet. Estimates need three completed, manually timed sessions of the same type. Longer intervals need six secure checks across the full current gap.</p>';
+    list.forEach(function(s,i){html+='<article class="suggestion"><h3>'+esc(s.label)+'</h3><p>'+(s.type==='timing'?esc(PURPOSE_LABELS[s.purpose])+': use <b>'+mins(s.to)+' min</b> instead of '+mins(s.from)+' min. Based on '+s.checks+' recent sessions.':'Try <b>'+s.to+' days</b> instead of '+s.from+'. '+s.checks+' secure checks across at least '+s.from+' days, without a later memory stumble.')+'</p><button class="btn btn-primary" data-action="accept-suggestion" data-index="'+i+'">Apply</button> <button class="btn btn-quiet" data-action="dismiss-suggestion" data-index="'+i+'">Not now</button></article>';});
+    openSheet(html+'<button class="btn btn-block" data-action="close-sheet">Close</button>');
+  }
 
   /* ------------------------------------------------------------------ *
    * Boot
@@ -131,12 +189,13 @@
   function render() {
     el('screen-today').hidden = view.tab !== 'today';
     el('screen-repertoire').hidden = view.tab !== 'repertoire';
+    el('screen-log').hidden = view.tab !== 'log';
     Array.prototype.forEach.call(document.querySelectorAll('.tab[data-tab]'), function (b) {
       var on = b.getAttribute('data-tab') === view.tab;
       b.classList.toggle('is-active', on);
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
-    if (view.tab === 'today') renderToday(); else renderRepertoire();
+    if (view.tab === 'today') renderToday(); else if(view.tab==='log')renderLog(); else renderRepertoire();
   }
 
   /* ------------------------------------------------------------------ *
@@ -172,6 +231,8 @@
     html += '<p class="date-line">' + esc(longDate(today)) + '</p>';
 
     html += renderNotices(today);
+    var returnPlan=A.state().settings.returnPlan;
+    if(returnPlan&&today<=returnPlan.end)html+='<p class="return-notice">Return week: overdue checks are spread through '+esc(longDate(returnPlan.end))+'.</p>';
     html += renderPracticeLog(today);
     html += renderSavedPlans(today);
     if (A.state().settings.onBreak) {
@@ -224,13 +285,13 @@
     if (c.learning) counts.push(c.learning + ' learning');
     counts.push(c.due + ' due');
     if (c.repair) counts.push(c.repair + ' in repair');
-    if (c.backlog) counts.push(c.backlog + ' in backlog');
+    
     html += '<p class="counts">' + counts.map(function (x) {
       return '<span>' + x + '</span>';
     }).join('') + '</p>';
 
     if (view.extra) html += '<p><b>' + mins(built.plannedMin) + ' min estimated</b></p>';
-    html += '<p class="small muted">No time limit. Reviews are balanced across your practice days; learning comes last.</p>';
+    
     if (built.allowanceMin) html += '<p class="small muted">Includes ' + mins(built.allowanceMin) + ' min for extra work on difficult passages.</p>';
 
     html += '<p class="plan-preview">' + planPreview(built) + '</p>';
@@ -258,25 +319,12 @@
   }
 
   function renderPracticeLog(today) {
-    var date = view.logDate || today, rows = A.practiceLog(date);
-    var html = '<section class="card practice-log"><div class="row-between"><h2>' + (date === today ? 'Practised today' : 'Practice record') + '</h2>' +
-      '<input aria-label="Practice record date" type="date" id="log-date" value="' + esc(date) + '" max="' + today + '"></div>';
-    if (!rows.length) html += '<p class="small muted">No practice recorded for this date.</p>';
-    else {
-      html += '<ul class="summary-list">';
-      rows.forEach(function (r) {
-        var result = r.type === 'technical' ? 'Technique: '+(r.grade==='broke'?'broke down':r.grade) : r.issue==='technical-slip'?'Technical slip':r.issue==='technical-problem'?'Technical problem':r.issue==='effort'?'Needed thought':r.type === 'warmup' ? 'Warmup' : r.grade === 'clean' ? 'Clean' : r.grade === 'wobbled' ? 'Wobbled' : r.grade === 'broke' ? 'Broke down' : 'Recorded';
-        html += '<li><span class="g">' + result + '</span><span class="t">' + esc(r.title + (r.section ? ' — ' + r.section : '')) +
-          '<span class="plan-meta">' + esc(r.composer) + '</span></span><span class="d">' + esc(r.detail) + '</span></li>';
-      });
-      html += '</ul>';
-    }
-    if (date !== today) html += '<button class="btn btn-sm btn-quiet" data-action="log-today">Back to today’s record</button>';
-    return html + '</section>';
+    var rows=A.practiceLog(today);if(!rows.length)return '';
+    return '<section class="card practice-log"><div class="row-between"><h2>Practised today</h2><button class="btn btn-sm btn-quiet" data-action="open-log">View log</button></div><ul class="today-record">'+rows.map(function(r){return '<li>'+esc(r.title+(r.section?' — '+r.section:''))+' <span class="small muted">'+esc(resultLabel(r))+'</span></li>';}).join('')+'</ul></section>';
   }
 
   function renderSavedPlans(today) {
-    var date = view.logDate || today;
+    var date = today;
     var saved = A.state().sessionArchive.filter(function (s) { return s.date === date && A.unfinishedItems(s).length; });
     if (!saved.length) return '';
     return '<details class="card"><summary>Unfinished plans (' + saved.length + ')</summary>' + saved.map(function (s) {
@@ -412,16 +460,16 @@
   function renderForecast(forecast, today) {
     var max=Math.max(1,...forecast.map(function(d){return d.projectedMin;}));
     return '<section class="card forecast"><h2>Week ahead</h2><div class="bars">'+forecast.map(function(d,i){
-      return '<div class="bar-col'+(i===0?' is-today':'')+'"><span class="tiny">'+mins(d.projectedMin)+'</span><div class="bar-wrap"><span class="bar'+(!d.practiceDay?' is-zero-day':'')+'" style="height:'+Math.max(2,Math.round(d.projectedMin/max*100))+'%"></span></div><span class="bar-label">'+DAYS_SHORT[d.weekday]+'</span><span class="tiny muted">'+(d.hardCount?d.hardCount+' hard':'')+'</span></div>';
-    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Balanced across the coming weeks using current review intervals. Established Monday reviews may move to Friday. Future plans adjust after practice; repair and frequent checks stay close to their due dates. Hard counts are whole pieces; section work is included in the minutes.</p></section>';
+      return '<div class="bar-col'+(i===0?' is-today':'')+'"><span class="tiny">'+Math.round(d.projectedMin)+'</span><div class="bar-wrap"><span class="bar'+(!d.practiceDay?' is-zero-day':'')+'" style="height:'+Math.max(2,Math.round(d.projectedMin/max*100))+'%"></span></div><span class="bar-label">'+DAYS_SHORT[d.weekday]+'</span><span class="tiny muted">'+(d.hardCount?d.hardCount+' hard':'')+'</span></div>';
+    }).join('')+'</div><p class="tiny muted">Estimated minutes, including learning and warmup. Plans adjust after practice.</p><details><summary>How the week is balanced</summary><p class="tiny muted">Reviews move within their spacing windows; repair stays close to its due date. After a week away, overdue first checks spread across the return week. Hard counts are whole pieces; section work is included in the minutes.</p></details></section>';
   }
 
   function timerText(ms) {var seconds=Math.floor(ms/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
   function timerControls() {
     var t=A.timerInfo();
-    return '<div class="practice-timer"><b id="elapsed-time" aria-label="Elapsed practice time">'+timerText(t.milliseconds)+'</b><button class="btn" data-action="toggle-timer"'+(t.finished?' disabled':'')+'>'+ (t.finished?'Recorded':t.running?'Pause timer':'Resume timer')+'</button><button class="btn btn-sm btn-quiet" data-action="adjust-timer">Correct time</button></div>';
+    return '<div class="timer-label">Timing: '+esc(PURPOSE_LABELS[t.purpose])+'</div><div class="practice-timer"><b id="elapsed-time" aria-label="Elapsed practice time">'+(t.started?timerText(t.milliseconds):'Not started')+'</b><button class="btn '+(!t.started?'btn-primary':'')+'" data-action="toggle-timer"'+(t.finished?' disabled':'')+'>'+ (t.finished?'Recorded':t.running?'Pause':t.started?'Resume':'Start practice')+'</button></div><details class="timer-options"><summary>Timing options</summary><p class="tiny muted">Time all work on this item, including repetitions and corrections. Pause for breaks. Changing this label affects estimates, not the result or review schedule.</p><label for="timing-purpose">Practice type</label><select id="timing-purpose"'+(t.finished?' disabled':'')+'>'+purposeOptions(t.purpose)+'</select><button class="btn btn-sm btn-quiet" data-action="adjust-timer">Correct time</button></details>';
   }
-  function beginVisibleTimer() {if(document.visibilityState==='visible'&&el('sheet').hidden)A.ensureTimer();}
+  function beginVisibleTimer() {A.ensureTimer();}
 
   /* ---------- running a session ---------- */
 
@@ -430,7 +478,7 @@
       beginVisibleTimer();
       root.innerHTML = '<h1>Warm up</h1><section class="card"><h2>' + esc(session.warmup.scale) + '</h2>' + timerControls() +
         '<p>About ' + mins(session.warmup.minutes) + ' minutes. One or two octaves, hands separately or together, at a comfortable tempo.</p>' +
-        '<p class="small muted">The scale advances when you tap Done. Days off and skipped warmups keep your place. Minor scales rotate through natural, harmonic and melodic forms.</p>' +
+        '<details class="grade-help"><summary>About scales</summary><p>The scale advances when you tap Done. Days off keep your place. Minor scales rotate through natural, harmonic and melodic forms.</p></details>' +
         '<button class="btn btn-primary btn-block" data-action="warmup-done">Done — start pieces</button>' +
         '<button class="btn btn-quiet btn-block" data-action="warmup-skip">Skip warmup</button>' +
         '<button class="btn btn-quiet btn-block" data-action="pause-session">Pause &amp; view plan</button></section>' + renderPlan(session.plan,null,'This session');
@@ -514,12 +562,12 @@
     if (isLearning) {
       html += renderLearningControl(p, it);
     } else {
-      html += '<button class="btn btn-primary btn-block" data-action="done-item"'+(!it.result||it.result.skipped?' disabled':'')+'>Done — next</button>' + '<div class="grades">' +
+      html += '<div class="grades">' +
         [['clean','Clean'],['wobbled','Wobbled'],['broke','Broke down']].map(function(choice){
           var selected=!!it.result&&it.result.grade===choice[0]&&!it.result.skipped;
           return '<button class="grade'+(selected?' is-selected':'')+'" data-grade="'+choice[0]+'" aria-label="'+choice[1]+'" aria-pressed="'+selected+'">'+(selected?'<span aria-hidden="true">✓ </span>':'')+choice[1]+'</button>';
         }).join('') +
-        '</div>'+outcomeControls(it)+'<p class="small muted">Grade your first attempt, then keep practising. Tap Done when you finish this piece or section.</p>' + gradeHelp(it.kind==='technical');
+        '</div>'+outcomeControls(it)+'<p class="small muted">Grade the first attempt. Finish any practice before tapping Done.</p><button class="btn btn-primary btn-block" data-action="done-item"'+(!it.result||it.result.skipped?' disabled':'')+'>Done — next</button>' + gradeHelp(it.kind==='technical');
     }
 
     html += '<div class="nav-row">' +
@@ -657,6 +705,8 @@
     html += '<p class="date-line">' + s.pieces.length + ' pieces · ' + s.composers.length + ' composers</p>';
 
     html += renderCapacityCard();
+    var suggestions=A.practiceSuggestions();
+    html+='<button class="btn btn-block" data-action="suggestions">Practice suggestions'+(suggestions.length?' ('+suggestions.length+')':'')+'</button>';
 
     html += '<div class="filters">';
     html += '<input type="search" id="f-search" placeholder="Search title, composer, tag, note" value="' +
@@ -788,11 +838,12 @@
 
     /* Fragility and both durations first — these are corrected constantly and
        must never be buried under the metadata. */
-    html += '<div class="field"><label>Fragility — how fast it decays (caps the interval at ' +
+    var advanced='';
+    advanced += '<details class="advanced-settings"><summary>Advanced scheduling</summary><div class="field"><label>Fragility — how fast it decays (caps the interval at ' +
       A.appliedCap(d.fragility, d.intervalCapDays) + ' days)</label>' +
       quick('fragility', d.fragility, 0.5) + '</div>';
 
-    html += '<div class="field"><label>Maximum review interval (days; blank = fragility default)</label><input type="number" min="1" max="60" data-field="intervalCapDays" value="' + (d.intervalCapDays || '') + '"></div>';
+    advanced += '<div class="field"><label>Maximum review interval (days; blank = fragility default)</label><input type="number" min="1" max="60" data-field="intervalCapDays" value="' + (d.intervalCapDays || '') + '"></div></details>';
 
     html += '<div class="field"><label>Playing difficulty — 1 easy, 5 hardest (order and allowance)</label>' + quick('practiceDifficulty', d.practiceDifficulty, 1) + '</div>';
     html += '<div class="field-row">' +
@@ -800,9 +851,10 @@
       '<div class="field"><label>Content (min, to memorise)</label>' + quick('contentMin', d.contentMin, 0.5) + '</div>' +
       '</div>';
 
-    html += '<div class="field"><label>Practice allowance (minutes; blank = automatic)</label><input type="number" min="0.25" step="0.25" data-field="practiceMinutes" value="'+(d.practiceMinutes||'')+'"><p class="tiny muted">Automatic: 3× playing time for difficulty 4–5, otherwise 1.3×. An explicit allowance takes priority over focused practice.</p></div>';
+    html += '<div class="field"><label>Practice allowance (minutes; blank = automatic)</label><input type="number" min="0.25" step="0.25" data-field="practiceMinutes" value="'+(d.practiceMinutes||'')+'"><details><summary>How allowances work</summary><p class="tiny muted">Without a measured allowance: 3× playing time for difficulty 4–5, otherwise 1.3×. Accepted estimates apply only to their practice type.</p></details></div>';
+    if(Object.keys(d.allowances||{}).length)html+='<p class="small muted">Accepted estimates: '+Object.keys(d.allowances).map(function(k){return esc(PURPOSE_LABELS[k])+' '+mins(d.allowances[k])+' min';}).join(', ')+'.</p><button class="btn btn-sm btn-quiet" data-action="reset-estimates">Use general allowance instead</button>';
     var measured=A.timingSummary(d.id);
-    if(measured)html += '<p class="small muted">Typical measured review: '+mins(measured.minutes)+' min (median of '+measured.sessions+' recent sessions, excluding learning and repair).</p>';
+    if(measured)html += '<p class="small muted">Typical measured review: '+mins(measured.minutes)+' min (median of '+measured.sessions+' manually timed maintenance sessions).</p>';
     html += '<div class="field"><label>Title</label>' +
       '<input data-field="title" value="' + esc(d.title) + '" placeholder="Prelude in G minor"></div>';
 
@@ -837,10 +889,10 @@
         '</div>';
     }
 
-    if (d.state === 'consolidating') html += '<p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; the interval grows after clean reviews.</p>';
+    if (d.state === 'consolidating') html += '<details class="grade-help"><summary>About consolidation</summary><p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; the interval grows after clean reviews.</p></details>';
     if(d.state==='consolidating'&&d.practiceDifficulty<=2&&!d.sectionFirst){
       var suggestion=A.consolidationSuggestion(A.pieceById(d.id));
-      html += '<p class="small muted">Easy consolidating pieces progress through 1, 2, 3, 5, 7, 10 and 14 days. Two secure first attempts across the current gap earn the next step, within the maximum interval. Weekends count. Needed thought holds the interval; a memory wobble returns to a shorter proven gap; a breakdown adds a next-day check. Promotion to established remains your choice.</p>';
+      html += '<details class="grade-help"><summary>How spacing grows</summary><p class="small muted">Easy consolidating pieces progress through 1, 2, 3, 5, 7, 10 and 14 days. Two secure first attempts across the current gap earn the next step, within the maximum interval. Weekends count. Needed thought holds the interval; a memory wobble returns to a shorter proven gap; a breakdown adds a next-day check. Promotion to established remains your choice.</p></details>';
       if(suggestion)html += '<button class="btn btn-block" data-action="space-consolidation" data-id="'+esc(d.id)+'">Move to every '+suggestion.intervalDays+' days</button>';
     }
     if (d.state === 'consolidating') html += '<div class="field"><label>Consolidation interval (days)</label>' +
@@ -859,6 +911,8 @@
 
     html += '<div class="field"><label>Notes</label>' +
       '<textarea data-field="notes" placeholder="Shown while you play">' + esc(d.notes) + '</textarea></div>';
+
+    html += advanced;
 
     html += '<div class="field"><label>Sections (' + d.sections.length + ')</label>' +
       '<p class="tiny muted">Each has its own schedule and repair state.</p>' +
@@ -890,6 +944,7 @@
         '<div class="field-row">' + input('practiceDifficulty', 'Playing difficulty (1–5; blank = piece)', 'number', 'min="1" max="5"') +
         input('practiceMinutes', 'Practice time (min; blank = usual estimate)', 'number', 'min="0.25" step="0.25"') + '</div>' +
         (measuredSection?'<p class="small muted">Typical measured practice: '+mins(measuredSection.minutes)+' min (median of '+measuredSection.sessions+' completed sessions).</p><button class="btn btn-sm" data-action="use-section-timing" data-index="'+i+'">Use measured allowance</button>':'') +
+        (Object.keys(sec.allowances||{}).length?'<p class="tiny muted">Accepted estimates: '+Object.keys(sec.allowances).map(function(k){return esc(PURPOSE_LABELS[k])+' '+mins(sec.allowances[k])+' min';}).join(', ')+'.</p><button class="btn btn-sm btn-quiet" data-action="reset-section-estimates" data-index="'+i+'">Use general allowance instead</button>':'') +
         input('intervalCapDays', 'Maximum interval (days; blank = fragility default)', 'number', 'min="1" max="60"') +
         input('notes', 'Practice note') +
         '<div class="field-row">' + input('intervalDays', 'Interval (days)', 'number', 'min="1"') + input('nextDue', 'Next due', 'date') + '</div>' +
@@ -1086,8 +1141,35 @@
 
     if (action !== 'save-learning') captureLearningDraft();
     switch (action) {
+      case 'open-log': view.tab='log';view.logDate=A.todayISO();refresh();break;
+      case 'log-prev': view.logDate=A.addDays(view.logDate||A.todayISO(),-1);renderLog();break;
+      case 'log-next': view.logDate=A.addDays(view.logDate||A.todayISO(),1);renderLog();break;
+      case 'add-log': openAddLog();break;
+      case 'edit-log': openLogEditor(t.getAttribute('data-key'));break;
+      case 'edit-log-time': openTimeEditor(t.getAttribute('data-id'));break;
+      case 'save-log-time': {
+        var value=el('log-minutes').value;if(value===''||!Number.isFinite(+value)||+value<0){alert('Enter zero or more minutes.');break;}
+        A.updateLoggedTime(view.timeEdit,+value,el('log-exclude').checked);closeSheet();break;
+      }
+      case 'save-log': {
+        var value=el('log-minutes')&&el('log-minutes').value;
+        if(value!=null&&(value===''||!Number.isFinite(+value)||+value<0)){alert('Enter zero or more minutes.');break;}
+        A.updateLogEntry(view.logEdit,{grade:el('log-grade')?el('log-grade').value:null,issue:el('log-issue')?el('log-issue').value:null,note:el('log-note').value,minutes:value==null?null:+value,excludeEstimate:el('log-exclude')&&el('log-exclude').checked});closeSheet();break;
+      }
+      case 'save-new-log': {
+        var value=el('log-minutes').value;if(value!==''&&(!Number.isFinite(+value)||+value<0)){alert('Enter zero or more minutes.');break;}
+        var date=el('new-log-date').value,added=A.addLogEntry({pieceId:el('new-log-piece').value,sectionId:el('new-log-section').value,date:date,purpose:el('new-log-purpose').value,grade:el('log-grade').value,issue:el('log-issue').value,note:el('log-note').value,minutes:value===''?null:+value,updateSchedule:el('new-log-schedule').checked});
+        if(!added){alert('Choose a valid practice date, no later than today.');break;}view.logDate=date;closeSheet();break;
+      }
+      case 'reset-estimates':d.allowances={};renderEditor();break;
+      case 'reset-section-estimates':d.sections[+t.getAttribute('data-index')].allowances={};renderEditor();break;
+      case 'suggestions':openSuggestions();break;
+      case 'accept-suggestion':case 'dismiss-suggestion': {
+        var suggestion=view.suggestions[+t.getAttribute('data-index')];
+        if(suggestion)A.respondToSuggestion(suggestion.pieceId,suggestion.sectionId,suggestion.key,action==='accept-suggestion');openSuggestions();break;
+      }
       case 'grade-issue': {var it=A.currentItem(),top=t.getBoundingClientRect().top;if(it&&it.result){A.timedGrade(it.result.grade,t.getAttribute('data-issue'));renderToday();var selected=document.querySelector('[data-action="grade-issue"].is-selected');if(selected)window.scrollBy(0,selected.getBoundingClientRect().top-top);}break;}
-      case 'use-section-timing': {var si=+t.getAttribute('data-index'),stat=A.timingSummary(d.id,d.sections[si].id);if(stat){d.sections[si].practiceMinutes=Math.max(.25,Math.ceil(stat.minutes*4)/4);renderEditor();}break;}
+      case 'use-section-timing': {var si=+t.getAttribute('data-index'),stat=A.timingSummary(d.id,d.sections[si].id);if(stat){d.sections[si].allowances=d.sections[si].allowances||{};d.sections[si].allowances.section=Math.max(.25,Math.ceil(stat.minutes*4)/4);renderEditor();}break;}
       case 'space-consolidation': {var id=t.getAttribute('data-id');if(!savePiece(true))break;A.spaceConsolidation(id);closeSheet();refresh();break;}
 
       case 'toggle-timer': if(A.timerInfo().running)A.pauseTimer();else A.startTimer();renderToday();break;
@@ -1342,7 +1424,7 @@
     var fields = {
       title: d.title, catalogue: d.catalogue, composerId: d.composerId,
       tier: +d.tier, state: d.state, durationMin: d.durationMin, contentMin: d.contentMin,
-      practiceMinutes: d.practiceMinutes, practiceDifficulty: d.practiceDifficulty, fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
+      allowances:d.allowances, practiceMinutes: d.practiceMinutes, practiceDifficulty: d.practiceDifficulty, fragility: d.fragility, priorKnowledge: d.priorKnowledge, notes: d.notes, learningFocus: d.learningFocus,
       consolidatingIntervalDays: d.consolidatingIntervalDays, focusedMinutes: d.focusedMinutes,
       sectionFirst: d.sectionFirst, maxSectionsPerDay: d.maxSectionsPerDay, intervalCapDays: d.intervalCapDays,
       tags: String(d.tags).split(',').map(function (x) { return x.trim(); }).filter(Boolean)
@@ -1376,7 +1458,11 @@
   }
 
   document.addEventListener('change', function (e) {
-    if (e.target.id === 'log-date') { view.logDate = e.target.value || null; renderToday(); }
+    if (e.target.id === 'log-date') { view.logDate = e.target.value || null; renderLog(); }
+    if(e.target.id==='timing-purpose'){A.changeTimingPurpose(e.target.value);renderToday();}
+    if(e.target.id==='new-log-piece')fillLogSections();
+    if(['new-log-section','new-log-date','new-log-purpose'].indexOf(e.target.id)>=0)syncNewLog();
+    if(e.target.id==='log-grade')syncLogGradeOptions();
   });
   document.addEventListener('visibilitychange', function () {
     if(document.visibilityState!=='visible'){captureLearningDraft();A.pauseTimer();releaseWakeLock();}
@@ -1388,7 +1474,7 @@
   setInterval(function(){
     if(!view.booted)return;
     var timer=A.timerInfo(),label=el('elapsed-time');
-    if(label)label.textContent=timerText(timer.milliseconds);
+    if(label)label.textContent=timer.started?timerText(timer.milliseconds):'Not started';
     if(timer.running&&++ticks%5===0)A.checkpointTimer();
     if(timer.running&&document.visibilityState==='visible'&&navigator.wakeLock&&!wakeLock&&!wakePending){
       wakePending=true;navigator.wakeLock.request('screen').then(function(lock){wakeLock=lock;lock.addEventListener('release',function(){wakeLock=null;});}).catch(function(){}).finally(function(){wakePending=false;});
