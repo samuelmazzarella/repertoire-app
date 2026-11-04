@@ -8,7 +8,9 @@
   /* View state only — nothing here is persisted. */
   var view = {
     tab: 'today',
-    extra: false,
+    extra: null,
+    customMinutes: null,
+    cancelledPlanId: null,
     day: null,
     logDate: null,
     minutes: null,          // current stepper value
@@ -180,8 +182,8 @@
 
   function refresh() {
     launchInfo = A.launch();
-    if (view.day !== launchInfo.today) { view.day = launchInfo.today; view.extra = false; view.minutes = null; }
-    if (A.practiceLog(launchInfo.today).length || A.state().sessionArchive.some(function (s) { return s.date === launchInfo.today; })) view.extra = true;
+    if (view.day !== launchInfo.today) { view.day = launchInfo.today; view.extra = null; view.minutes = null; view.customMinutes = null; }
+    if (view.extra == null) view.extra = A.practiceLog(launchInfo.today).length > 0;
     if (view.minutes == null) view.minutes = view.extra ? 15 : launchInfo.recommended || launchInfo.budget || 45;
     render();
   }
@@ -224,7 +226,7 @@
 
   function renderLaunch(root, today) {
     var c = launchInfo.counts;
-    var built = A.buildSession(view.minutes, today, {extra:view.extra});
+    var built = A.buildSession(view.minutes, today, {extra:view.extra,timeLimit:view.customMinutes});
     var html = '';
 
     html += '<h1>Today</h1>';
@@ -235,6 +237,7 @@
     if(returnPlan&&today<=returnPlan.end)html+='<p class="return-notice">Return week: overdue checks are spread through '+esc(longDate(returnPlan.end))+'.</p>';
     html += renderPracticeLog(today);
     html += renderSavedPlans(today);
+    if(view.cancelledPlanId)html+='<p class="return-notice" role="status">Plan cancelled. Recorded practice kept. <button class="btn btn-sm" data-action="undo-cancel-plan">Undo</button></p>';
     if (A.state().settings.onBreak) {
       root.innerHTML = html + '<section class="card"><h2>Taking a break</h2><p>No piano or no time: your records are saved. Review dates keep their meaning; missed days are not failures.</p><button class="btn btn-primary btn-block" data-action="end-break">I’m ready to practise</button></section>'; return;
     }
@@ -270,7 +273,7 @@
     html += '<h2>' + (view.extra ? 'Extra practice' : 'Plan a session') + '</h2>';
 
     if (view.extra) {
-      html += '<p class="ideal-line">Optional: finish today’s reviews, with one extra full play-through of a learned piece. Learning comes last.</p>';
+      html += '<p class="ideal-line">Finish today’s reviews and add full play-throughs if there’s time. Learning comes last.</p>';
     } else if (launchInfo.zeroBudgetDay) {
       html += '<p class="headline" style="font-size:1.35rem">No session scheduled</p>';
       html += '<p class="ideal-line">' + esc(DAYS[launchInfo.weekday]) + ' is set to 0 minutes. Practise anyway?</p>';
@@ -296,12 +299,16 @@
 
     html += '<p class="plan-preview">' + planPreview(built) + '</p>';
     html += warmupPreview(built.warmup);
+    html += '<div class="time-options"><button class="btn btn-block" data-action="less-time">I have less time today</button><button class="btn btn-block" data-action="more-time">I have more time today</button></div>';
+    if(view.customMinutes!=null)html+='<p class="small">'+mins(view.customMinutes)+' min available for this session. <button class="btn btn-sm btn-quiet" data-action="suggested-time">Use suggested plan</button></p>'+deferredPreview(built);
+    if(!built.items.length)html+='<p class="small muted">'+(built.warmup.minutes?'Only the warmup fits. Choose more time to include a piece.':'No work fits this allowance. Choose more time, or take today off.')+'</p>';
 
     html += '<div class="stack" style="margin-top:16px">' +
-      '<button class="btn btn-primary btn-block" data-action="start">' + (view.extra ? 'Start extra practice' : 'Start') + '</button>';
+      '<button class="btn btn-primary btn-block" data-action="start"'+(!built.items.length&&!built.warmup.minutes?' disabled':'')+'>' + (view.extra ? 'Start extra practice' : 'Start') + '</button>';
     if (!view.extra) html += '<button class="btn btn-quiet btn-block" data-action="skip-today">' +
       (launchInfo.zeroBudgetDay ? 'Not today' : 'Skip today') + '</button>' +
       '<button class="btn btn-quiet btn-block" data-action="optional-practice">Plan optional practice</button>';
+    if(view.extra)html+='<button class="btn btn-quiet btn-block" data-action="normal-plan">Back to today’s plan</button>';
     html += '</div>';
 
     html += '</section>';
@@ -312,6 +319,31 @@
     html += renderForecast(launchInfo.forecast, today);
 
     root.innerHTML = html;
+  }
+
+  function deferredPreview(built) {
+    if(!built.deferredCount)return '';
+    return '<details class="deferred-preview"><summary>'+plural(built.deferredCount,'item')+' left out</summary><p class="small muted">These stay on their review schedules. No practice is recorded for them.</p><ul>'+built.deferred.map(function(it){var p=A.pieceById(it.pieceId),sec=it.sectionId&&A.sectionById(p,it.sectionId);return '<li>'+esc(p.title+(sec?' — '+sec.label:''))+'</li>';}).join('')+'</ul></details>';
+  }
+  function openSessionAllowance(mode) {
+    var session=A.state().session;
+    view.adjustingActive=!!(session&&!session.finished);
+    if(view.adjustingActive){captureLearningDraft();A.pauseSession();refresh();}
+    var current=view.adjustingActive?A.remainingSessionMinutes():A.buildSession(view.minutes,A.todayISO(),{extra:view.extra,timeLimit:view.customMinutes}).plannedMin;
+    var initial=mode==='extra'?15:mode==='less'?Math.max(5,Math.floor((current-10)/5)*5):mode==='more'?Math.ceil((current+10)/5)*5:Math.ceil(current);
+    openSheet('<h2>'+(view.adjustingActive?'Adjust time left':'Time for this session')+'</h2><p class="small muted">'+(view.adjustingActive?'Minutes available from now. Recorded and started work stays saved.':'Choose an allowance for this session. Your usual schedule stays uncapped.')+'</p><div class="field"><label for="session-minutes">'+(view.adjustingActive?'Minutes left':'Minutes available')+'</label><input id="session-minutes" type="number" inputmode="decimal" min="0" step="any" value="'+initial+'"></div><div class="time-presets">'+[15,30,45,60].map(function(n){return '<button class="btn btn-sm" data-action="allowance-preset" data-minutes="'+n+'">'+n+' min</button>';}).join('')+'</div><div id="allowance-preview" aria-live="polite"></div><button class="btn btn-primary btn-block" id="apply-allowance" data-action="apply-allowance">Use this plan</button><button class="btn btn-quiet btn-block" data-action="close-sheet">Keep current plan</button>');
+    renderAllowancePreview();
+  }
+  function renderAllowancePreview() {
+    var value=el('session-minutes').value,valid=value!==''&&Number.isFinite(+value)&&+value>=0;
+    el('apply-allowance').disabled=!valid;
+    if(!valid){el('allowance-preview').innerHTML='<p>Enter zero or more minutes.</p>';return;}
+    var built=view.adjustingActive?A.previewSessionTime(+value):A.buildSession(+value,A.todayISO(),{extra:view.extra,timeLimit:+value});
+    el('allowance-preview').innerHTML='<p><b>'+mins(built.plannedMin)+' min estimated</b> · '+plural(built.items.length,'item')+'</p>'+
+      (built.overAllowance?'<p class="return-notice">Started work is kept, even when it exceeds your remaining time. You can stop and return later.</p>':'')+
+      (built.allowanceMin?'<p class="small muted">Includes '+mins(built.allowanceMin)+' min for extra work on difficult passages.</p>':'')+
+      (built.warmup.status==='pending'?warmupPreview(built.warmup):'')+
+      (built.items.length?'<ol class="allowance-items">'+built.items.map(function(it){var p=A.pieceById(it.pieceId),sec=it.sectionId&&A.sectionById(p,it.sectionId);return '<li>'+esc(p.title+(sec?' — '+sec.label:''))+' <span class="muted">· '+mins(it.estMin)+' min'+(it.kind==='continuity'?' · full play-through':'')+'</span></li>';}).join('')+'</ol>':'<p class="small">No pieces fit. Choose more time, or finish for now.</p>')+deferredPreview(built);
   }
 
   function warmupPreview(w) {
@@ -329,7 +361,7 @@
     if (!saved.length) return '';
     return '<details class="card"><summary>Unfinished plans (' + saved.length + ')</summary>' + saved.map(function (s) {
       var remaining = A.unfinishedItems(s).length;
-      return '<p class="small">' + remaining + ' items left from a closed session.</p><button class="btn btn-block" data-action="resume-closed" data-id="' + esc(s.id) + '">Continue unfinished items</button>';
+      return '<div class="saved-plan"><p class="small">' + remaining + ' items left from '+(s.mode==='extra'?'extra practice':'a closed session')+'.</p><button class="btn btn-block" data-action="resume-closed" data-id="' + esc(s.id) + '">Continue unfinished items</button><button class="btn btn-quiet btn-block" data-action="cancel-plan" data-id="'+esc(s.id)+'">Cancel plan</button></div>';
     }).join('') + '</details>';
   }
 
@@ -369,14 +401,15 @@
 
   function renderPaused(root, session, today) {
     var prog = A.sessionProgress();
-    var remaining = session.plan.reduce(function (n,it,i) { return n + (session.results[i] && session.results[i].finished!==false ? 0 : it.estMin); },0);
+    var remaining = A.remainingSessionMinutes(today);
     root.innerHTML = '<h1>Today</h1><p class="date-line">' + esc(longDate(today)) + '</p>' +
       '<section class="card"><h2>Session paused</h2><p>' + prog.recorded + ' of ' + prog.total +
       ' recorded · about ' + mins(remaining) + ' min left</p>' +
       (session.date !== today ? '<p class="small muted">Continuing the plan from ' + esc(longDate(session.date)) + '.</p>' : '') +
       '<button class="btn btn-primary btn-block" data-action="resume-paused">Resume session</button>' +
       '<button class="btn btn-quiet btn-block" data-action="finish-session">Finish for now</button></section>' +
-      '<button class="btn btn-block btn-quiet" data-action="replan">Plan a different session</button>' +
+      '<button class="btn btn-block" data-action="replan">Adjust time left</button>' +
+      '<button class="btn btn-block btn-quiet" data-action="cancel-plan" data-id="'+esc(session.id)+'">Cancel this plan</button><p class="tiny muted">Cancelling keeps recorded practice and notes.</p>' +
       '<button class="btn btn-block btn-quiet" data-action="start-break">No piano / take a break</button>' +
       renderPlan(session.plan, session) + renderPracticeLog(today);
   }
@@ -416,7 +449,7 @@
       out += '<br><span class="defer">' + plural(b.learningYielded, 'learning slot') +
         ' paused below your ' + b.referenceMin + '-minute target.</span>';
     }
-    if (b.deferredCount > 0) {
+    if (b.deferredCount > 0 && b.timeLimit == null) {
       out += '<br><span class="defer">' + plural(b.deferredCount, 'review') +
         ' deferred (' + mins(b.deferredMin) + ' min).</span>';
     }
@@ -1175,11 +1208,23 @@
       case 'toggle-timer': if(A.timerInfo().running)A.pauseTimer();else A.startTimer();renderToday();break;
       case 'adjust-timer': {A.pauseTimer();var value=prompt('Practice minutes (excluding breaks):',mins(A.timerInfo().milliseconds/60000));if(value!==null&&value.trim()!==''&&Number.isFinite(+value)&&+value>=0)A.adjustTimer(+value);renderToday();break;}
       case 'done-item': A.finishTimedItem();refresh();window.scrollTo(0,0);break;
-      case 'optional-practice': view.extra = true; view.minutes = 15; refresh(); break;
+      case 'optional-practice': view.extra = true; view.customMinutes = null; refresh(); break;
+      case 'normal-plan': view.extra=false; view.customMinutes=null; refresh(); break;
+      case 'suggested-time': view.customMinutes=null; refresh(); break;
+      case 'less-time': openSessionAllowance('less'); break;
+      case 'more-time': openSessionAllowance('more'); break;
+      case 'allowance-preset': el('session-minutes').value=t.getAttribute('data-minutes'); renderAllowancePreview(); break;
+      case 'apply-allowance': {
+        var value=el('session-minutes').value; if(value===''||!Number.isFinite(+value)||+value<0)break;
+        if(view.adjustingActive)A.resizeSession(+value);else view.customMinutes=+value;
+        closeSheet();refresh();break;
+      }
+      case 'cancel-plan': {captureLearningDraft();var live=A.state().session,id=t.getAttribute('data-id');view.cancelledPlanId=A.cancelPlan(id);if(live&&live.id===id){view.extra=null;view.customMinutes=null;}refresh();window.scrollTo(0,0);break;}
+      case 'undo-cancel-plan': A.restoreCancelledPlan(view.cancelledPlanId);view.cancelledPlanId=null;refresh();break;
       case 'warmup-done': A.markWarmup(true); refresh(); break;
       case 'warmup-skip': A.markWarmup(false); refresh(); break;
-      case 'plan-extra': A.endSession(); view.extra = true; view.minutes = 15; refresh(); break;
-      case 'replan': A.endSession(); view.minutes = null; refresh(); break;
+      case 'plan-extra': A.endSession(); view.extra = true; view.customMinutes = null; refresh(); openSessionAllowance('extra'); break;
+      case 'replan': openSessionAllowance('active'); break;
       case 'resume-closed':
         if (!A.resumeClosed(t.getAttribute('data-id'))) alert('Those items have already been reviewed or are no longer scheduled. You can plan a new session below.');
         refresh(); break;
@@ -1222,7 +1267,8 @@
         renderToday();
         break;
       case 'start':
-        A.startSession(view.minutes, null, {extra:view.extra});
+        A.startSession(view.minutes, null, {extra:view.extra,timeLimit:view.customMinutes});
+        view.cancelledPlanId=null;
         refresh();
         window.scrollTo(0, 0);
         break;
@@ -1264,7 +1310,7 @@
         break;
       case 'finish-session':
         A.finishSession();
-        view.extra = true; view.minutes = 15;
+        view.extra = null; view.customMinutes = null; view.minutes = null;
         refresh();
         window.scrollTo(0, 0);
         break;
@@ -1286,7 +1332,8 @@
 
       case 'close-summary':
         A.endSession();
-        view.extra = true;
+        view.extra = null;
+        view.customMinutes = null;
         view.minutes = null;
         view.pctFor = null;
         refresh();
@@ -1388,6 +1435,7 @@
 
   /* Text inputs in the sheet write straight into the draft. */
   document.addEventListener('input', function (e) {
+    if(e.target.id==='session-minutes'){renderAllowancePreview();return;}
     if (['learning-focus','learning-achievement','learning-next'].indexOf(e.target.id) >= 0) { captureLearningDraft(); return; }
     var d = view.editing;
     if (!d) return;

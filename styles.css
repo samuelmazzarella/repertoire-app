@@ -696,3 +696,12 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .suggestion { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .suggestion h3 { font-size: 1rem; }
 .return-notice { border-left: 3px solid var(--accent); padding-left: 12px; font-size: .9rem; }
+
+/* One-off session allowances */
+.time-options { display:grid; gap:8px; margin:16px 0; }
+.time-presets { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+.allowance-items { padding-left:1.5em; line-height:1.6; }
+.allowance-items li { margin-bottom:8px; }
+.deferred-preview { margin:12px 0; font-size:.9rem; }
+.deferred-preview summary { cursor:pointer; }
+.saved-plan + .saved-plan { border-top:1px solid var(--border); margin-top:16px; padding-top:8px; }

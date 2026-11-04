@@ -420,12 +420,12 @@
 
   function normalizeSession(raw) {
     if (!raw || !Array.isArray(raw.plan)) return null;
-    var plan = raw.plan.map(function (it) {
+    var plan = raw.plan.map(function (it,index) {
       return {
-        pieceId: str(it.pieceId),
+        pieceId: str(it.pieceId),recordKey:it.recordKey!=null&&/^\d+$/.test(String(it.recordKey))?String(it.recordKey):String(index),
         sectionId: it.sectionId ? str(it.sectionId) : null,
         kind: oneOf(it.kind, ['learning', 'maintenance', 'lookahead', 'continuity', 'technical'], 'maintenance'),
-        title: str(it.title), composer: str(it.composer), sectionLabel: str(it.sectionLabel),
+        title: str(it.title), composer: str(it.composer), sectionLabel: str(it.sectionLabel), optional:it.optional===true,
         estMin: num(it.estMin, 0)
       };
     }).filter(function (it) { return it.pieceId; });
@@ -444,6 +444,7 @@
       id: str(raw.id) || 'session-' + str(raw.date) + '-' + str(raw.startedAt),
       mode: oneOf(raw.mode, ['normal', 'extra', 'manual'], 'normal'),
       continued: raw.continued === true,
+      cancelled:raw.cancelled===true,timeLimit:raw.timeLimit==null?null:Math.max(0,num(raw.timeLimit,0)),
       warmup: raw.warmup && typeof raw.warmup === 'object' ? raw.warmup : null,
       date: isoOrNull(raw.date),
       budgetMin: Math.max(0, num(raw.budgetMin, 0)),
@@ -1219,6 +1220,7 @@
     if (!s) return;
     var copy = JSON.parse(JSON.stringify(s));
     copy.finished = true; copy.paused = false;
+    if(copy.mode==='extra'&&!copy.results.some(function(r){return r&&!r.skipped;})&&!(copy.warmup&&copy.warmup.status==='done')&&!Object.values(copy.timers||{}).some(function(t){return t.elapsedMs>0;})&&!copy.learningDraft)copy.cancelled=true;
     // Old snapshots cannot safely undo later sessions or manual corrections.
     copy.results.forEach(function (r) { if (r) { delete r.snapshot; r.locked = true; } });
     var at = store.sessionArchive.findIndex(function (x) { return x.id === copy.id; });
@@ -1226,11 +1228,11 @@
     store.session = null;
   }
 
-  function planEntry(it) {
+  function planEntry(it,index) {
     var p = it.piece || pieceById(it.pieceId), sec = p && it.sectionId ? sectionById(p,it.sectionId) : null;
-    return {pieceId:it.pieceId, sectionId:it.sectionId || null, kind:it.kind, estMin:it.estMin,
+    return {pieceId:it.pieceId, recordKey:String(index==null?0:index), sectionId:it.sectionId || null, kind:it.kind, estMin:it.estMin,
       title:p ? p.title : it.title, composer:p ? composerName(p.composerId) : it.composer,
-      sectionLabel:sec ? sec.label : ''};
+      sectionLabel:sec ? sec.label : '',optional:it.optional===true};
   }
 
   function createSession(built, today, mode) {
@@ -1239,21 +1241,21 @@
       date:today, budgetMin:built.budgetMin, plan:built.items.map(planEntry), index:0,
       results:new Array(built.items.length), deferredCount:built.deferredCount || 0,
       deferredMin:built.deferredMin || 0, startedAt:today, finished:false, paused:false,
-      learningDraft:null, mode:mode || 'normal', warmup:built.warmup || warmupForDate(today,0)};
+      learningDraft:null, timeLimit:built.timeLimit==null?null:built.timeLimit, cancelled:false, mode:mode || 'normal', warmup:built.warmup || warmupForDate(today,0)};
     store.settings.skippedDate = null;
     logCapacity(built); save();
   }
 
   function unfinishedItems(old) {
-    if (!old || old.continued) return [];
+    if (!old || old.continued || old.cancelled) return [];
     return old.plan.filter(function (it,i) { return !old.results[i] || old.results[i].skipped; }).map(function (it) {
       var p = pieceById(it.pieceId), sec = p && it.sectionId ? sectionById(p,it.sectionId) : null;
       if (!p || !isScheduled(p) || (it.sectionId && (!sec || sec.enabled === false))) return null;
       var subject = sec || p;
       if ((subject.history || []).some(function (h) { return h.date && h.date >= old.date; })) return null;
       if (p.sectionFirst && !sec && p.state === 'learning' && !sectionProgress(p).ready) return null;
-      return {pieceId:p.id,piece:p,sectionId:sec ? sec.id : null,kind:p.state === 'learning' && !p.sectionFirst ? 'learning' : 'maintenance',
-        estMin:p.state === 'learning' && !p.sectionFirst ? TUNING.learningSlotMin : pieceCost(subject)};
+      return {pieceId:p.id,piece:p,sectionId:sec ? sec.id : null,kind:p.state === 'learning' && !p.sectionFirst ? 'learning' : it.kind,
+        estMin:p.state === 'learning' && !p.sectionFirst ? store.settings.learningMinutes : pieceCost(subject,it.kind==='continuity'?'performance':it.kind==='technical'?'technical':undefined)};
     }).filter(Boolean);
   }
 
@@ -1679,7 +1681,7 @@
     if(store.settings.demandDriven)result.finished=!!payload.skip;
     if(!payload.skip){
       var h=it.subject.history[it.subject.history.length-1];
-      if(h){h.recordId=s.id+':'+i;h.timingId=h.recordId;h.purpose=s.timers&&s.timers[i]&&s.timers[i].purpose||taskPurpose;h.logBefore=JSON.parse(JSON.stringify(snap));h.logAfter=scheduleSignature(it.subject);h.logConfig=logConfiguration(it.subject);}
+      if(h){h.recordId=s.id+':'+recordKey(s,i);h.timingId=h.recordId;h.purpose=s.timers&&s.timers[recordKey(s,i)]&&s.timers[recordKey(s,i)].purpose||taskPurpose;h.logBefore=JSON.parse(JSON.stringify(snap));h.logAfter=scheduleSignature(it.subject);h.logConfig=logConfiguration(it.subject);}
     }
     s.results[i] = result;
     trimLogSnapshots(it.subject);
@@ -3168,6 +3170,7 @@
 
   function buildDemandSession(today,options) {
     today=today||todayISO();options=options||{};
+    if(options.timeLimit!=null)return fitSessionTime(buildDemandSession(today,{extra:options.extra}),options.timeLimit,today);
     var day=weekPlan(today,7,budgetForDate(today)===0&&!inBreak(today)&&store.settings.skippedDate!==today)[0];
     var items=day.items.filter(function(it){
       var p=it.piece,subject=it.sectionId?sectionById(p,it.sectionId):p;
@@ -3179,7 +3182,7 @@
         return MAINTENANCE_STATES.indexOf(p.state)>=0 && p.state!=='repair' && !reviewedOn(p,today) &&
           !items.some(function(it){return it.pieceId===p.id&&!it.sectionId;});
       }).sort(function(a,b){return String(a.lastPlayed||'').localeCompare(String(b.lastPlayed||''))||cmpId(a,b);})[0];
-      if(next)items.push({pieceId:next.id,piece:next,kind:'continuity',estMin:pieceCost(next,'performance')});
+      if(next)items.push({pieceId:next.id,piece:next,kind:'continuity',estMin:pieceCost(next,'performance'),optional:true});
     }
     items=orderForPractice(items);
     var warmup=warmupForDate(today,practiceLog(today).some(function(r){return r.type==='warmup';})?0:store.settings.warmupMinutes);
@@ -3197,6 +3200,97 @@
       deferred:[],deferredCount:0,deferredMin:0,learningYielded:0,excessLearners:0};
   }
 
+  // A one-off allowance changes a session, never the usual weekly demand.
+  function itemKey(it){return it.pieceId+'::'+(it.sectionId||'');}
+  function recordKey(s,i){return s.plan[i]&&s.plan[i].recordKey!=null?String(s.plan[i].recordKey):String(i);}
+  function taskDifficulty(it){var p=pieceById(it.pieceId),sec=p&&it.sectionId?sectionById(p,it.sectionId):null;return sec&&sec.practiceDifficulty!=null?sec.practiceDifficulty:p?p.practiceDifficulty:3;}
+  function taskSubject(it){var p=pieceById(it.pieceId);return p&&(it.sectionId?sectionById(p,it.sectionId):p);}
+  function taskIsLearning(it){var p=pieceById(it.pieceId);return it.kind==='learning'||p&&p.state==='learning';}
+  function sessionEstimate(items,warmup){
+    var subtotal=items.reduce(function(n,it){return n+Math.max(0,it.estMin);},0)+(warmup&&warmup.status==='pending'?warmup.minutes:0);
+    var allowance=items.some(function(it){return taskDifficulty(it)>=4;})?subtotal/9:0;
+    return {total:subtotal+allowance,allowance:allowance};
+  }
+  function optionalRuns(today,excluded){
+    return store.pieces.filter(function(p){return MAINTENANCE_STATES.indexOf(p.state)>=0&&p.state!=='repair'&&!reviewedOn(p,today)&&!excluded[p.id+'::'];})
+      .sort(function(a,b){return String(a.lastPlayed||'').localeCompare(String(b.lastPlayed||''))||cmpId(a,b);})
+      .map(function(p){return {pieceId:p.id,piece:p,kind:'continuity',sectionId:null,estMin:pieceCost(p,'performance'),optional:true};});
+  }
+  function fitSessionTime(base,minutes,today){
+    var limit=Math.max(0,num(minutes,0)),items=base.items.slice(),chosen=[],deferred=[];
+    var warmup=Object.assign({},base.warmup||warmupForDate(today,0));
+    if(warmup.status==='pending'&&!base.warmupPinned)warmup.minutes=Math.min(warmup.minutes,limit);
+    if(!warmup.minutes&&warmup.status==='pending'&&!base.warmupPinned)warmup.status='skipped';
+    var excluded={};items.forEach(function(it){excluded[itemKey(it)]=true;});
+    (base.excludeOptional||[]).forEach(function(key){excluded[key]=true;});
+    items=items.concat(optionalRuns(today,excluded));
+    function rank(it){var p=taskSubject(it);return it.pinned?-1:it.optional?6:taskIsLearning(it)?4:it.kind==='technical'||p&&p.state==='repair'?0:p&&p.state==='consolidating'?1:it.kind==='lookahead'?3:2;}
+    items.sort(function(a,b){var d=rank(a)-rank(b);if(d)return d;var ap=taskSubject(a),bp=taskSubject(b);return (ap&&bp?priority(bp,today)-priority(ap,today):0)||a.estMin-b.estMin||itemKey(a).localeCompare(itemKey(b));});
+    var sectionsUsed={};
+    items.forEach(function(it){
+      var parent=pieceById(it.pieceId),limited=parent&&parent.sectionFirst&&it.sectionId;
+      if(limited&&!it.pinned&&(sectionsUsed[parent.id]||0)>=sectionSlotsLeft(parent,today)){if(!it.optional)deferred.push(it);return;}
+      function keep(value){chosen.push(value);if(limited&&!reviewedOn(taskSubject(it),today))sectionsUsed[parent.id]=(sectionsUsed[parent.id]||0)+1;}
+      if(it.pinned||sessionEstimate(chosen.concat([it]),warmup).total<=limit+1e-8){keep(it);return;}
+      if(it.kind==='learning'&&!it.optional){
+        var hard=chosen.concat([it]).some(function(x){return taskDifficulty(x)>=4;}),available=limit*(hard?.9:1)-(warmup.status==='pending'?warmup.minutes:0)-chosen.reduce(function(n,x){return n+x.estMin;},0);
+        if(available>=1){keep(Object.assign({},it,{estMin:Math.min(it.estMin,available)}));return;}
+      }
+      if(!it.optional)deferred.push(it);
+    });
+    chosen=orderForPractice(chosen);var estimate=sessionEstimate(chosen,warmup);
+    return Object.assign({},base,{items:chosen,warmup:warmup,timeLimit:limit,budgetMin:limit,plannedMin:estimate.total,allowanceMin:estimate.allowance,
+      demandMin:chosen.reduce(function(n,it){return n+it.estMin;},0),deferred:deferred,deferredCount:deferred.length,deferredMin:deferred.reduce(function(n,it){return n+it.estMin;},0),
+      learning:chosen.filter(taskIsLearning),maintenance:chosen.filter(function(it){return !taskIsLearning(it)&&it.kind==='maintenance';}),technical:chosen.filter(function(it){return it.kind==='technical';}),lookahead:chosen.filter(function(it){return it.kind==='lookahead';}),continuity:chosen.filter(function(it){return it.kind==='continuity';}),
+      overAllowance:estimate.total>limit+.01});
+  }
+  function remainingSessionBase(today){
+    var s=store.session;if(!s)return null;
+    var base=buildDemandSession(today,{}),taken={},items=[],done=[];
+    s.plan.forEach(function(entry,i){
+      var result=s.results[i],timer=s.timers&&s.timers[recordKey(s,i)],key=itemKey(entry);
+      taken[key]=true;
+      if(result&&(result.skipped||result.finished!==false)){done.push(key);return;}
+      var subject=taskSubject(entry);if(!subject)return;
+      var pinned=!!(timer&&timer.started)||!!result||!!(s.learningDraft&&s.learningDraft.pieceId===entry.pieceId);
+      var elapsed=timer?elapsedTimer(timer)/60000:0;
+      items.push(Object.assign({},entry,{piece:pieceById(entry.pieceId),pinned:pinned,originalIndex:i,estMin:Math.max(0,entry.estMin-elapsed)}));
+    });
+    base.items.forEach(function(it){if(!taken[itemKey(it)]){taken[itemKey(it)]=true;items.push(it);}});
+    var warmup=Object.assign({},s.warmup||base.warmup),wt=s.timers&&s.timers.warmup;
+    if(warmup.status==='pending'&&wt)warmup.minutes=Math.max(0,warmup.minutes-elapsedTimer(wt)/60000);
+    return Object.assign({},base,{items:items,warmup:warmup,warmupPinned:!!(wt&&wt.started),excludeOptional:done});
+  }
+  function previewSessionTime(minutes,today){
+    today=today||todayISO();var base=remainingSessionBase(today);return base?fitSessionTime(base,minutes,today):null;
+  }
+  function remainingSessionMinutes(today){var base=remainingSessionBase(today||todayISO());return base?sessionEstimate(base.items.filter(function(it){return it.originalIndex!=null;}),base.warmup).total:0;}
+  function resizeSession(minutes,today){
+    today=today||todayISO();var s=store.session;if(!s||!Number.isFinite(minutes)||minutes<0)return false;
+    checkpointTimer(true);
+    var built=previewSessionTime(minutes,today),oldPlan=s.plan,oldResults=s.results,current=oldPlan[s.index],plan=[],results=[];
+    oldPlan.forEach(function(it,i){it.recordKey=recordKey(s,i);});
+    var nextKey=Math.max(-1,...oldPlan.map(function(it){return +it.recordKey;}),...Object.keys(s.timers||{}).filter(function(k){return k!=='warmup';}).map(Number))+1;
+    oldPlan.forEach(function(it,i){var r=oldResults[i];if(r&&(r.skipped||r.finished!==false)){plan.push(it);results.push(r);}});
+    built.items.forEach(function(it){
+      if(it.originalIndex!=null){var original=oldPlan[it.originalIndex];if(!it.pinned)original.estMin=it.estMin;plan.push(original);results.push(oldResults[it.originalIndex]||null);}
+      else{var entry=planEntry(it);entry.recordKey=String(nextKey++);plan.push(entry);results.push(null);}
+    });
+    s.plan=plan;s.results=results;s.timeLimit=minutes;s.budgetMin=minutes;s.deferredCount=built.deferredCount;s.deferredMin=built.deferredMin;
+    if(s.warmup&&s.warmup.status==='pending'&&!(s.timers&&s.timers.warmup&&s.timers.warmup.started))s.warmup=built.warmup;
+    s.paused=true;s.finished=false;s.date=today;
+    var at=plan.indexOf(current);s.index=at>=0&&(!results[at]||results[at].finished===false)?at:results.findIndex(function(r){return !r||r.finished===false;});if(s.index<0)s.index=plan.length;
+    save();return built;
+  }
+  function cancelPlan(id){
+    if(store.session&&(!id||store.session.id===id)){
+      var cancelledId=store.session.id;store.session.cancelled=true;archiveSession();save();return cancelledId;
+    }
+    var old=store.sessionArchive.find(function(s){return s.id===id;});if(!old)return false;old.cancelled=true;save();return old.id;
+  }
+  function restoreCancelledPlan(id){var old=store.sessionArchive.find(function(s){return s.id===id;});if(!old)return false;old.cancelled=false;save();return true;}
+
+
   // v6.6: measurements describe a task, not each repetition within it.
   var PURPOSES=['maintenance','section','repair','technical','performance','learning','warmup'];
   function currentPurposeFor(kind,p,sec){
@@ -3211,7 +3305,7 @@
     if(PURPOSES.indexOf(purpose)<0)return false;
     checkpointTimer(true);var t=currentTimer(true);if(!t||t.finished)return false;
     t.purpose=purpose;
-    var s=store.session,id=s.id+':'+(s.warmup&&s.warmup.status==='pending'?'warmup':s.index);
+    var s=store.session,id=s.id+':'+(s.warmup&&s.warmup.status==='pending'?'warmup':recordKey(s,s.index));
     var row=store.practiceTimes.find(function(r){return r.id===id;});if(row)row.purpose=purpose;
     storeTiming(t);save();return true;
   }
@@ -3343,13 +3437,13 @@
   }
   function updateArchivedResult(h){
     if(!h.recordId)return;
-    store.sessionArchive.concat(store.session?[store.session]:[]).forEach(function(s){s.results.forEach(function(r,i){if(r&&s.id+':'+i===h.recordId){r.grade=h.grade;r.issue=h.issue;r.locked=true;delete r.snapshot;}});});
+    store.sessionArchive.concat(store.session?[store.session]:[]).forEach(function(s){s.results.forEach(function(r,i){if(r&&s.id+':'+recordKey(s,i)===h.recordId){r.grade=h.grade;r.issue=h.issue;r.locked=true;delete r.snapshot;}});});
   }
   function updateLoggedTime(id,minutes,excludeEstimate){
     var t=store.practiceTimes.find(function(x){return x.id===id;});
     if(!t||!Number.isFinite(minutes)||minutes<0)return false;
     addActualMinutes(t.date,minutes-t.minutes);t.minutes=minutes;t.excludeEstimate=!!excludeEstimate;
-    store.sessionArchive.concat(store.session?[store.session]:[]).forEach(function(s){Object.keys(s.timers||{}).forEach(function(k){if(s.id+':'+k===id){s.timers[k].elapsedMs=minutes*60000;s.timers[k].runningSince=null;}});s.results.forEach(function(r,i){if(r&&s.id+':'+i===id)r.actualMinutes=minutes;});});save();return true;
+    store.sessionArchive.concat(store.session?[store.session]:[]).forEach(function(s){Object.keys(s.timers||{}).forEach(function(k){if(s.id+':'+k===id){s.timers[k].elapsedMs=minutes*60000;s.timers[k].runningSince=null;}});s.results.forEach(function(r,i){if(r&&s.id+':'+recordKey(s,i)===id)r.actualMinutes=minutes;});});save();return true;
   }
   function addLogEntry(fields,today){
     today=today||todayISO();var p=pieceById(fields.pieceId),sec=p&&fields.sectionId?sectionById(p,fields.sectionId):null,subject=sec||p;
@@ -3389,7 +3483,7 @@
     var warmup=s.warmup&&s.warmup.status==='pending';
     if(!warmup&&s.index>=s.plan.length)return null;
     if(!s.timers)s.timers={};
-    var key=warmup?'warmup':String(s.index);
+    var key=warmup?'warmup':recordKey(s,s.index);
     if(!s.timers[key]&&create)s.timers[key]={elapsedMs:0,runningSince:null,checkpoint:null,started:false,finished:false,purpose:currentPurpose()};
     return s.timers[key]||null;
   }
@@ -3402,7 +3496,7 @@
     var s=store.session;if(!s||!t)return;
     var warmup=s.warmup&&s.warmup.status==='pending',it=warmup?{pieceId:null}:s.plan[s.index];
     if(!it)return;
-    var id=s.id+':'+(warmup?'warmup':s.index);
+    var id=s.id+':'+(warmup?'warmup':recordKey(s,s.index));
     var previous=store.practiceTimes.find(function(x){return x.id===id;});
     if(!t.started)return;
     var minutes=t.elapsedMs/60000, delta=minutes-(previous?previous.minutes:0);
@@ -3487,7 +3581,8 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.6',
+    VERSION: '6.7',
+    previewSessionTime:previewSessionTime,resizeSession:resizeSession,remainingSessionMinutes:remainingSessionMinutes,cancelPlan:cancelPlan,restoreCancelledPlan:restoreCancelledPlan,
     PURPOSES:PURPOSES,changeTimingPurpose:changeTimingPurpose,practiceSuggestions:practiceSuggestions,respondToSuggestion:respondToSuggestion,
     prepareReturnPlan:prepareReturnPlan,logEntries:logEntries,canReplayLog:canReplayLog,updateLogEntry:updateLogEntry,updateLoggedTime:updateLoggedTime,addLogEntry:addLogEntry,
     weekPlan:weekPlan,
