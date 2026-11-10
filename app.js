@@ -21,6 +21,11 @@
   var TUNING = {
     // Interval arithmetic
     cleanMultiplier: 1.4,          // established + Clean -> interval x this
+    lateCreditShare: 0.5,          // share of an overrun credited to a late Clean
+    repeatWobbleFactor: 0.75,      // second memory wobble running -> interval x this
+    lateWobbleGrace: 1.25,         // ...unless it came this far past the interval
+    capProofShare: 0.15,           // a check this far short of the cap still proves it
+    cadenceProofChecks: 3,         // clean checks before suggesting a longer cadence
     firstEstablishedInterval: 3,   // interval on first entering established
     consolidatingIntervalDays: 3,  // fixed cadence while consolidating
     learningIntervalDays: 1,       // fixed cadence while learning
@@ -56,6 +61,20 @@
     capacityNudgeDays: 14,         // sustained overrun before the one nudge
     capacityObservedMinDays: 30,   // history window for supporting statistics
     capacityLogDays: 90            // how much daily log to retain
+  };
+
+  /* Retention. localStorage on iOS holds roughly 2.5 million characters, and a
+   * save that does not fit is a save that is lost. Detail that nothing reads
+   * any more is dropped on launch; practice records themselves are kept. */
+  var RETENTION = {
+    archiveDetailDays: 14,    // closed sessions keep their plan this long
+    archiveDays: 400,         // ...and their warmup line this long
+    snapshotDays: 30,         // undo/replay baselines on history entries
+    timingDays: 120,          // per-item timings (the newest 12 per task stay)
+    timingKeep: 12,
+    historyDetailDays: 550,   // scheduling detail on history entries
+    quotaChars: 2500000,
+    warnRatio: 0.8
   };
 
   /* Interval caps by fragility. Validated against 18 months of real data —
@@ -161,6 +180,12 @@
   var store = null;          // the live state object
   var listeners = [];
   var lastSaveError = null;
+  /* The balanced week plan is pure but expensive, and one refresh asks for it
+   * several times. Results are reused until state next changes: every write
+   * goes through save(), and load/setState replace the store outright. */
+  var lastSavedChars = 0;
+  var planRev = 0, planCache = {};
+  function invalidatePlans() { planRev++; planCache = {}; }
 
   function notify() {
     for (var i = 0; i < listeners.length; i++) {
@@ -170,9 +195,12 @@
 
   /* The only write to persistent storage in the codebase. */
   function save() {
+    invalidatePlans();
     lastSaveError = null;
     try {
-      storage.setItem(STORAGE_KEY, JSON.stringify(store));
+      var json = JSON.stringify(store);
+      lastSavedChars = json.length;
+      storage.setItem(STORAGE_KEY, json);
     } catch (e) {
       lastSaveError = e;   // quota, private browsing, eviction mid-write
     }
@@ -188,6 +216,7 @@
       try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
     }
     store = normalizeState(parsed);
+    invalidatePlans();
     return store;
   }
 
@@ -397,6 +426,7 @@
         returnPlan: s.returnPlan && isValidISO(s.returnPlan.start) ? s.returnPlan : null,
         breaks: Array.isArray(s.breaks) ? s.breaks.filter(function (b) { return isoOrNull(b.start); }) : [],
         skippedDate: isoOrNull(s.skippedDate),
+        learnPromptDismissed: s.learnPromptDismissed == null ? null : str(s.learnPromptDismissed),
         warmupMinutes: clamp(num(s.warmupMinutes, 2), 0, 5),
         scaleStep: s.scaleStep == null ? null : Math.max(0, Math.floor(num(s.scaleStep,0))),
         capacityWatch: {
@@ -405,6 +435,8 @@
         }
       },
       reviewAssignments: raw.reviewAssignments && typeof raw.reviewAssignments === 'object' ? Object.fromEntries(Object.entries(raw.reviewAssignments).filter(function(pair){return isValidISO(pair[1]);})) : {},
+      /* Daily minutes for timings old enough to have been rolled up. */
+      practiceTotals: raw.practiceTotals && typeof raw.practiceTotals === 'object' ? Object.fromEntries(Object.entries(raw.practiceTotals).filter(function(pair){return isValidISO(pair[0])&&Number.isFinite(pair[1])&&pair[1]>0;})) : {},
       practiceTimes: Array.isArray(raw.practiceTimes) ? raw.practiceTimes.filter(function(x){return x && typeof x.id==='string' && isValidISO(x.date) && Number.isFinite(x.minutes) && x.minutes>=0;}) : [],
       appliedUpdates: Array.isArray(raw.appliedUpdates) ? raw.appliedUpdates.filter(function (id) { return typeof id === 'string'; }) : [],
       composers: Array.isArray(raw.composers) ? raw.composers.map(normalizeComposer).filter(function (c) { return c.id; }) : [],
@@ -444,6 +476,7 @@
       id: str(raw.id) || 'session-' + str(raw.date) + '-' + str(raw.startedAt),
       mode: oneOf(raw.mode, ['normal', 'extra', 'manual'], 'normal'),
       continued: raw.continued === true,
+      compacted:raw.compacted===true,
       cancelled:raw.cancelled===true,timeLimit:raw.timeLimit==null?null:Math.max(0,num(raw.timeLimit,0)),
       warmup: raw.warmup && typeof raw.warmup === 'object' ? raw.warmup : null,
       date: isoOrNull(raw.date),
@@ -680,6 +713,29 @@
 
   function historyType(state) { return state === 'learning' ? 'learning' : 'maintenance'; }
 
+  /* Graded checks of memory, oldest first. Technical checks and results put
+   * down to a technical cause say nothing about recall and are left out. */
+  function memoryChecks(subject) {
+    return subject.history.filter(function (h) {
+      return h.grade && h.type !== 'technical' && h.issue !== 'technical-slip' && h.issue !== 'technical-problem';
+    });
+  }
+
+  /* True when the memory check before the one just recorded was also a
+   * wobble, at an established interval. Called after the new entry is
+   * pushed, so the entry in question is second from last. */
+  function wobbledLastTime(subject) {
+    var checks = memoryChecks(subject), prior = checks[checks.length - 2];
+    return !!prior && prior.grade === 'wobbled' && prior.stateBefore === 'established';
+  }
+
+  /* Two graded reviews running put down to a one-off technical slip. The
+   * app only asks the question; whether it is one passage is yours to say. */
+  function repeatedSlip(subject) {
+    var graded = subject.history.filter(function (h) { return h.grade && h.type !== 'technical'; }).slice(-2);
+    return graded.length === 2 && graded.every(function (h) { return h.issue === 'technical-slip'; });
+  }
+
   function setPieceState(p, next, today) {
     if (p.state !== next) {
       p.state = next;
@@ -757,19 +813,43 @@
         } else {
           var current = p.intervalDays || TUNING.firstEstablishedInterval;
           var capped = appliedCap(p.fragility, p.intervalCapDays);
-          if (early && grade === 'clean') {
-            p.intervalDays = clampInterval(current, p.fragility, p.intervalCapDays);
+          /* The gap this recall actually survived. The schedule is a plan;
+           * the evidence is the days that really passed. */
+          var held = elapsed == null ? current : elapsed;
+          if (grade === 'clean' && early && held < current) {
+            /* Played before it was due, so only the shorter gap is proven.
+             * The interval grows only if that gap, lengthened, beats the
+             * current one: a review the week balancer moved a day or two
+             * early keeps most of its step; a replay days after the last
+             * one earns nothing, as before. */
+            var earned = Math.round(held * TUNING.cleanMultiplier);
+            p.intervalDays = earned > current
+              ? Math.max(current, jitterInterval(earned, p.fragility, p.intervalCapDays))
+              : clampInterval(current, p.fragility, p.intervalCapDays);
           } else if (grade === 'clean') {
-            /* Math.round(1 * 1.4) === 1, so without a floor of one extra day
+            /* A Clean after a longer gap than scheduled — a weekend, a
+             * holiday — has proven more than the schedule asked. Credit part
+             * of the overrun rather than none of it.
+             *
+             * Math.round(1 * 1.4) === 1, so without a floor of one extra day
              * an interval of 1 is an absorbing state: a piece that has
              * ratcheted down through repeated lapses can never climb out of
              * it, and is played daily forever. Clean must always buy at
              * least a day while there is headroom under the cap. */
-            var target = Math.max(current + 1, Math.round(current * TUNING.cleanMultiplier));
+            var basis = current + Math.max(0, held - current) * TUNING.lateCreditShare;
+            var target = Math.max(current + 1, Math.round(basis * TUNING.cleanMultiplier));
             p.intervalDays = jitterInterval(target, p.fragility, p.intervalCapDays);
             if (p.intervalDays <= current && current < capped) {
               p.intervalDays = Math.min(current + 1, capped);
             }
+          } else if (wobbledLastTime(p) && held <= current * TUNING.lateWobbleGrace) {
+            /* One wobble is noise and holds the interval. Two running say
+             * the gap is longer than this piece's memory reliably spans —
+             * unless this one came well after the piece was due, which
+             * says something about the break, not about the interval. */
+            p.intervalDays = clampInterval(
+              Math.max(1, Math.min(current - 1, Math.round(current * TUNING.repeatWobbleFactor))),
+              p.fragility, p.intervalCapDays);
           } else {
             // An uncertain recall never earns a longer interval.
             p.intervalDays = clampInterval(current, p.fragility, p.intervalCapDays);
@@ -927,8 +1007,13 @@
       p.nextDue = addDays(today, p.intervalDays);
     } else if (p.state === 'consolidating') {
       setPieceState(p, 'established', today);
-      p.intervalDays = p.sectionFirst ? clampInterval(p.intervalDays || 7, p.fragility, p.intervalCapDays) : TUNING.firstEstablishedInterval;
-      p.nextDue = addDays(today, p.intervalDays);
+      /* Never start below the gap consolidation already reached: a piece
+       * holding at five days should not go back to three. The clock runs
+       * from the last time it was played, not from the tap. */
+      var reached = Math.max(TUNING.firstEstablishedInterval, p.consolidatingIntervalDays || 0);
+      p.intervalDays = clampInterval(p.sectionFirst ? (p.intervalDays || 7) : reached, p.fragility, p.intervalCapDays);
+      var due = addDays(p.lastPlayed || today, p.intervalDays);
+      p.nextDue = due < today ? today : due;
     }
     return p;
   }
@@ -2673,6 +2758,36 @@
     return c;
   }
 
+  /* The project's own measure: what could be played for someone today, and
+   * how many composers that covers. */
+  function coverage() {
+    var ready = store.pieces.filter(function (p) { return MAINTENANCE_STATES.indexOf(p.state) >= 0; });
+    var covered = {};
+    ready.forEach(function (p) { covered[p.composerId] = true; });
+    return { ready: ready.length, composers: Object.keys(covered).length, totalComposers: store.composers.length };
+  }
+
+  /* What to learn next, when a learning slot is free. Tiers in order; within
+   * a tier, a composer not yet represented first, then whatever is closest
+   * to ready, then the shorter piece. A suggestion only — any backlog piece
+   * can be started from the Repertoire tab. */
+  function learnNext() {
+    var learning = store.pieces.filter(function (p) { return p.state === 'learning'; }).length;
+    var free = store.settings.learningEnabled ? Math.max(0, store.settings.maxLearning - learning) : 0;
+    var backlog = store.pieces.filter(function (p) { return p.state === 'backlog'; });
+    if (!free || !backlog.length) return null;
+    var active = {};
+    store.pieces.forEach(function (p) { if (p.state !== 'backlog') active[p.composerId] = true; });
+    var known = { near: 0, played: 1, 'new': 2 };
+    backlog.sort(function (a, b) {
+      return a.tier - b.tier || Number(!!active[a.composerId]) - Number(!!active[b.composerId]) ||
+        known[a.priorKnowledge] - known[b.priorKnowledge] || a.durationMin - b.durationMin || cmpId(a, b);
+    });
+    var key = String(learning);
+    return { free: free, piece: backlog[0], tier: backlog[0].tier, key: key,
+      dismissed: store.settings.learnPromptDismissed === key };
+  }
+
   /* ------------------------------------------------------------------ *
    * Seed
    * ------------------------------------------------------------------ */
@@ -2797,6 +2912,77 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * Retention
+   *
+   * Runs on launch. Removes only detail that no longer drives anything:
+   * the item lists of long-closed sessions, undo baselines too old to
+   * replay, and per-item timings beyond the window the estimates read.
+   * Grades, notes and dates are never removed. Returns true on any change.
+   * ------------------------------------------------------------------ */
+
+  function compactStorage(today) {
+    today = today || todayISO();
+    var changed = false;
+
+    var detailFrom = addDays(today, -RETENTION.archiveDetailDays);
+    var archiveFrom = addDays(today, -RETENTION.archiveDays);
+    var kept = store.sessionArchive.filter(function (s) { return !s.date || s.date >= archiveFrom; });
+    if (kept.length !== store.sessionArchive.length) { store.sessionArchive = kept; changed = true; }
+    store.sessionArchive.forEach(function (s) {
+      if (s.compacted || (s.date && s.date >= detailFrom)) return;
+      s.plan = []; s.results = []; s.timers = {}; s.learningDraft = null; s.index = 0;
+      s.compacted = true; changed = true;
+    });
+
+    var snapFrom = addDays(today, -RETENTION.snapshotDays);
+    var slimFrom = addDays(today, -RETENTION.historyDetailDays);
+    var slimFields = ['elapsedDays', 'intervalBefore', 'early', 'stateBefore', 'recordId', 'timingId', 'purpose'];
+    store.pieces.forEach(function (p) {
+      [p].concat(p.sections).forEach(function (subject) {
+        subject.history.forEach(function (h) {
+          if (!h.date || h.date >= snapFrom) return;
+          if (h.logBefore || h.logAfter || h.logConfig) {
+            delete h.logBefore; delete h.logAfter; delete h.logConfig; changed = true;
+          }
+          if (h.date >= slimFrom) return;
+          slimFields.forEach(function (k) { if (h[k] !== undefined) { delete h[k]; changed = true; } });
+          if (h.issue === 'memory') { delete h.issue; changed = true; }
+        });
+      });
+    });
+
+    var timeFrom = addDays(today, -RETENTION.timingDays);
+    if (store.practiceTimes.some(function (t) { return t.date < timeFrom; })) {
+      var seen = {}, keep = [];
+      for (var i = store.practiceTimes.length - 1; i >= 0; i--) {
+        var t = store.practiceTimes[i];
+        /* The estimate reads the newest few completed, manually timed runs
+         * of each task. Those stay however old they are. */
+        var counts = t.pieceId && pieceById(t.pieceId) && t.manualStart === true && t.finished && t.minutes > 0 && !t.excludeEstimate;
+        var key = t.pieceId + '|' + (t.sectionId || '') + '|' + (t.purpose || '');
+        if (counts) seen[key] = (seen[key] || 0) + 1;
+        if (t.date >= timeFrom || (counts && seen[key] <= RETENTION.timingKeep)) { keep.push(t); continue; }
+        if (t.minutes > 0) store.practiceTotals[t.date] = (store.practiceTotals[t.date] || 0) + t.minutes;
+        changed = true;
+      }
+      store.practiceTimes = keep.reverse();
+    }
+    return changed;
+  }
+
+  function storageReport() {
+    var chars = lastSavedChars || JSON.stringify(store).length;
+    var ratio = chars / RETENTION.quotaChars;
+    return { chars: chars, quotaChars: RETENTION.quotaChars, ratio: ratio, warn: ratio >= RETENTION.warnRatio };
+  }
+
+  /* Minutes practised on a date: live timings plus any rolled-up total. */
+  function minutesOn(date) {
+    return store.practiceTimes.reduce(function (n, t) { return t.date === date ? n + t.minutes : n; }, 0) +
+      (store.practiceTotals[date] || 0);
+  }
+
+  /* ------------------------------------------------------------------ *
    * Launch
    *
    * One call that ui.js makes on open. Evaluates the gap line, the capacity
@@ -2818,8 +3004,10 @@
 
     prepareReturnPlan(today,false);
     var nudge = store.settings.onBreak ? null : capacityNudge(today);     // mutates capacityWatch
-    if(store.settings.demandDriven)weekPlan(today,7,false);
-    if (nudge || dropped || store.settings.demandDriven) save();
+    // Only the older unbalanced planner pins review dates as a side effect.
+    if(store.settings.demandDriven&&!store.settings.balancedPlanning)weekPlan(today,7,false);
+    var compacted = compactStorage(today);
+    if (nudge || dropped || compacted || store.settings.demandDriven) save();
 
     return {
       today: today,
@@ -2836,6 +3024,10 @@
       exportReminder: needsExportReminder(today) ? { days: daysSinceExport(today) } : null,
       resumable: store.session,
       storagePersistent: storage.persistent !== false,
+      storage: storageReport(),
+      suggestions: practiceSuggestions(today).length,
+      coverage: coverage(),
+      learnNext: learnNext(),
       saveError: lastSaveError
     };
   }
@@ -2844,8 +3036,19 @@
   // not persistent commitments; overdue anchors and active sessions prevent drift.
   function balancedWeekPlan(today, requestedDays, includeToday) {
     today=today||todayISO();requestedDays=requestedDays||7;
-    var horizon=Math.max(21,requestedDays+7), dates=[],active=[],jobs=[],chains={},buckets=[];
-    var session=store.session,started=practiceLog(today).length>0||!!(session&&session.date===today),locked={};
+    var horizon=Math.max(21,requestedDays+7);
+    var planning=!!(store.settings.returnPlan&&store.settings.returnPlan.planning);
+    var cacheKey=[today,horizon,includeToday?1:0,planning?1:0].join('|'),cached=planCache[cacheKey];
+    if(!cached)cached=planCache[cacheKey]=computeBalancedPlan(today,horizon,includeToday);
+    // Callers get their own day objects and item lists; pieces stay live.
+    return cached.slice(0,requestedDays).map(function(day){
+      var copy=Object.assign({},day);copy.items=day.items.map(function(it){return Object.assign({},it);});return copy;
+    });
+  }
+  function computeBalancedPlan(today, horizon, includeToday) {
+    var dates=[],active=[],jobs=[],chains={},buckets=[];
+    var todayLog=practiceLog(today),warmedUp=todayLog.some(function(r){return r.type==='warmup';});
+    var session=store.session,started=todayLog.length>0||!!(session&&session.date===today),locked={};
     if(session&&session.date===today&&!session.finished)session.plan.forEach(function(it,i){
       if(!session.results[i])locked[it.pieceId+(it.sectionId?'::'+it.sectionId:'')]=true;
     });
@@ -2904,7 +3107,7 @@
       var previous=null,parent=unitParent(u),chain=[];
       for(var occurrence=0;occurrence<horizon;occurrence++){
         var job={unit:u,parent:parent,interval:Math.max(1,u.intervalDays||1),previous:previous,next:null,occurrence:occurrence,
-          locked:occurrence===0&&!!locked[u.id],cost:pieceCost(u),hard:unitDifficulty(u)>=4};
+          locked:occurrence===0&&!!locked[u.id],cost:pieceCost(u),hard:unitDifficulty(u)>=4,learning:learningUnit(u)};
         var opts=choices(job).filter(function(d){return sectionRoom(job,d);});
         if(!opts.length&&u.sectionId&&parent.sectionFirst){
           var due=dueFor(job);for(var d=0;d<horizon;d++)if(active[d]&&dates[d]>=due&&(!previous||d>previous.day)&&sectionRoom(job,d)){opts=[d];break;}
@@ -2916,15 +3119,21 @@
       }
       chains[u.id]=chain;
     });
+    var planningReturn=!!(store.settings.returnPlan&&store.settings.returnPlan.planning);
     function totals(){
       var list=buckets.map(function(b){return {maintenance:0,learning:b.baseLearning,hard:0,hardMinutes:0,count:b.learning.length};});
-      jobs.forEach(function(j){var b=list[j.day];b[learningUnit(j.unit)?'learning':'maintenance']+=j.cost;b.count++;if(j.hard){b.hardMinutes+=j.cost;if(!j.unit.sectionId)b.hard++;}});
-      return list.map(function(b,d){var warmup=b.count&&active[d]&&!(d===0&&practiceLog(today).some(function(r){return r.type==='warmup';}))?store.settings.warmupMinutes:0;var sum=b.maintenance+b.learning+warmup;b.warmup=warmup;b.allowance=b.hardMinutes?sum/9:0;b.total=sum+b.allowance;return b;});
+      jobs.forEach(function(j){var b=list[j.day];b[j.learning?'learning':'maintenance']+=j.cost;b.count++;if(j.hard){b.hardMinutes+=j.cost;if(!j.unit.sectionId)b.hard++;}});
+      return list.map(function(b,d){var warmup=b.count&&active[d]&&!(d===0&&warmedUp)?store.settings.warmupMinutes:0;var sum=b.maintenance+b.learning+warmup;b.warmup=warmup;b.allowance=b.hardMinutes?sum/9:0;b.total=sum+b.allowance;return b;});
     }
     function objective(){
       var t=totals(),score=0;
       t.forEach(function(b){score+=b.total*b.total+35*Math.pow(Math.max(0,b.hard-2),2)+.15*b.hardMinutes*b.hardMinutes;});
-      jobs.forEach(function(j){var due=dueFor(j);if(!j.previous&&store.settings.returnPlan&&store.settings.returnPlan.planning&&returnDate(j.unit,today))due=today;score+=2*Math.pow(daysBetween(due,dates[j.day]),2);});
+      // Whole-day arithmetic on indexes: the same numbers as comparing the
+      // dates, without building a Date for every job on every trial.
+      jobs.forEach(function(j){
+        if(j.firstDue===undefined)j.firstDue=j.previous?null:(planningReturn&&returnDate(j.unit,today)?0:daysBetween(today,j.unit.nextDue));
+        var late=j.day-(j.previous?j.previous.day+j.interval:j.firstDue);score+=2*late*late;
+      });
       return score;
     }
     // Coordinate descent over the complete workload. Check both adjacent
@@ -2973,7 +3182,7 @@
     }
     var sum=totals();
     jobs.forEach(function(j){var due=dueFor(j),it=reviewItem(j.unit,dates[j.day]<due?'lookahead':'maintenance');it.naturalDue=due;it.projected=j.occurrence>0;buckets[j.day].items.push(it);});
-    return buckets.slice(0,requestedDays).map(function(b,d){
+    return buckets.map(function(b,d){
       b.learning.forEach(function(p){b.items.push({pieceId:p.id,piece:p,kind:'learning',estMin:store.settings.learningMinutes});});
       return {date:b.date,weekday:b.weekday,items:orderForPractice(b.items),maintenanceMin:sum[d].maintenance,learningMin:sum[d].learning,
         hardCount:sum[d].hard,hardMinutes:sum[d].hardMinutes,warmupMin:sum[d].warmup,allowanceMin:sum[d].allowance,projectedMin:sum[d].total,
@@ -3314,15 +3523,39 @@
   function intervalSuggestion(subject,today){
     if(!subject||subject.state!=='established'||subject.technique)return null;
     var cap=appliedCap(subject.fragility,subject.intervalCapDays);
-    if(cap>=60||subject.intervalDays<cap)return null;
+    /* Jitter leaves a capped piece a day or two under its cap, and the week
+     * balancer plays it a day or two early. Requiring the full cap on both
+     * meant most secure checks were never counted. */
+    var near=Math.max(1,cap-Math.max(2,Math.round(cap*TUNING.capProofShare)));
+    if(cap>=60||subject.intervalDays<near)return null;
     var dates=[];
     subject.history.filter(function(h){return h.date<=today&&h.type!=='technical'&&h.grade;}).slice().sort(function(a,b){return a.date.localeCompare(b.date);}).forEach(function(h){
       if(h.issue==='technical-slip'||h.issue==='technical-problem')return;
       if(h.grade!=='clean'||h.issue==='effort'){dates=[];return;}
-      if(h.intervalBefore>=cap&&h.elapsedDays>=cap&&dates.indexOf(h.date)<0)dates.push(h.date);
+      if(h.intervalBefore>=near&&h.elapsedDays>=near&&dates.indexOf(h.date)<0)dates.push(h.date);
     });
     if(dates.length<6)return null;
-    return {from:cap,to:Math.min(60,cap+Math.max(1,Math.min(3,Math.round(cap*.2)))),checks:dates.length,last:dates[dates.length-1]};
+    return {from:cap,near:near,to:Math.min(60,cap+Math.max(1,Math.min(3,Math.round(cap*.2)))),checks:dates.length,last:dates[dates.length-1]};
+  }
+  /* Harder consolidating pieces sit on a fixed cadence until promoted, which
+   * can mean daily play long after daily play has stopped teaching anything.
+   * After a run of clean first attempts across the current gap, suggest the
+   * next one. Easy pieces already climb their own ladder. */
+  function cadenceSuggestion(p,today){
+    today=today||todayISO();
+    if(!p||p.state!=='consolidating'||p.sectionFirst||p.technique||p.practiceDifficulty<=2)return null;
+    var current=p.consolidatingIntervalDays||TUNING.consolidatingIntervalDays;
+    var limit=Math.min(7,appliedCap(p.fragility,p.intervalCapDays));
+    var next=[2,3,5,7].filter(function(n){return n>current&&n<=limit;})[0];
+    if(!next)return null;
+    var since=p.consolidationCadenceSince&&p.consolidationCadenceSince>(p.stateSince||'')?p.consolidationCadenceSince:(p.stateSince||''),dates=[];
+    memoryChecks(p).forEach(function(h){
+      if(!h.date||h.date<since||h.date>today)return;
+      if(h.grade!=='clean'||h.issue==='effort'){dates=[];return;}
+      if(!h.early&&h.intervalBefore===current&&h.elapsedDays>=current&&dates.indexOf(h.date)<0)dates.push(h.date);
+    });
+    if(dates.length<TUNING.cadenceProofChecks)return null;
+    return {from:current,to:next,checks:dates.length,last:dates[dates.length-1]};
   }
   function practiceSuggestions(today){
     today=today||todayISO();var out=[];
@@ -3331,7 +3564,16 @@
       if(store.session&&!store.session.finished&&store.session.plan.some(function(it){return it.pieceId===p.id;}))return;
       var label=p.title+(sectionId?' — '+subject.label:'');
       var gap=intervalSuggestion(subject,today);
-      if(gap)out.push({type:'interval',pieceId:p.id,sectionId:sectionId,label:label,from:gap.from,to:gap.to,checks:gap.checks,key:'interval:'+gap.from+':'+gap.last});
+      if(gap)out.push({type:'interval',pieceId:p.id,sectionId:sectionId,label:label,from:gap.from,near:gap.near,to:gap.to,checks:gap.checks,key:'interval:'+gap.from+':'+gap.last});
+      if(!sectionId){
+        var cadence=cadenceSuggestion(p,today);
+        if(cadence)out.push({type:'cadence',pieceId:p.id,sectionId:null,label:label,from:cadence.from,to:cadence.to,checks:cadence.checks,key:'cadence:'+cadence.from+':'+cadence.last});
+        if(suggestsPromotion(p,today)){
+          var cleans=cleanDatesSinceFailure(p);
+          out.push({type:'promote',pieceId:p.id,sectionId:null,label:label,checks:cleans.length,days:daysBetween(p.stateSince,today),
+            to:clampInterval(Math.max(TUNING.firstEstablishedInterval,p.consolidatingIntervalDays||0),p.fragility,p.intervalCapDays),key:'promote:'+p.stateSince});   // "Not now" holds for this spell of consolidation
+        }
+      }
       ['maintenance','section','repair','technical','performance'].forEach(function(purpose){
         if(sectionId&&purpose==='maintenance'||!sectionId&&purpose==='section')return;
         var stat=timingSummary(p.id,sectionId,purpose);if(!stat)return;
@@ -3347,6 +3589,11 @@
     if(!s)return false;var subject=subjectFor(pieceId,sectionId);
     if(accept){
       if(s.type==='timing'){subject.allowances=subject.allowances||{};subject.allowances[s.purpose]=s.to;}
+      else if(s.type==='promote')promote(subject,today);
+      else if(s.type==='cadence'){
+        subject.consolidatingIntervalDays=s.to;subject.intervalDays=s.to;subject.consolidationCadenceSince=today;
+        subject.nextDue=addDays(subject.lastPlayed||today,s.to);
+      }
       else{subject.intervalCapDays=s.to;subject.intervalDays=s.to;if(subject.nextDue>=today)subject.nextDue=addDays(subject.lastPlayed||today,s.to);}
     }
     subject.suggestionDismissals=subject.suggestionDismissals||{};subject.suggestionDismissals[key]=true;
@@ -3371,6 +3618,7 @@
       assignments[u.id]={date:days[best],latest:days[limit-1],due:u.nextDue,lastPlayed:u.lastPlayed||null};loads[best]+=pieceCost(u);if(isHard)hard[best]++;
     });
     store.settings.returnPlan={start:today,end:days[days.length-1],sourceLast:last,assignments:assignments,planning:true};
+    invalidatePlans();
     // Include ordinary due work, future recurrences, learning and hard-piece load.
     balancedWeekPlan(today,daysBetween(today,days[days.length-1])+1,false).forEach(function(day){day.items.forEach(function(it){var key=it.pieceId+(it.sectionId?'::'+it.sectionId:'');if(!it.projected&&assignments[key])assignments[key].date=day.date;});});
     delete store.settings.returnPlan.planning;save();return true;
@@ -3581,8 +3829,11 @@
    * ------------------------------------------------------------------ */
 
   global.App = {
-    VERSION: '6.7',
+    VERSION: '6.9',
+    RETENTION:RETENTION,compactStorage:compactStorage,storageReport:storageReport,minutesOn:minutesOn,
     previewSessionTime:previewSessionTime,resizeSession:resizeSession,remainingSessionMinutes:remainingSessionMinutes,cancelPlan:cancelPlan,restoreCancelledPlan:restoreCancelledPlan,
+    coverage:coverage,learnNext:learnNext,
+    repeatedSlip:repeatedSlip,cadenceSuggestion:cadenceSuggestion,intervalSuggestion:intervalSuggestion,
     PURPOSES:PURPOSES,changeTimingPurpose:changeTimingPurpose,practiceSuggestions:practiceSuggestions,respondToSuggestion:respondToSuggestion,
     prepareReturnPlan:prepareReturnPlan,logEntries:logEntries,canReplayLog:canReplayLog,updateLogEntry:updateLogEntry,updateLoggedTime:updateLoggedTime,addLogEntry:addLogEntry,
     weekPlan:weekPlan,
@@ -3612,7 +3863,7 @@
     load: load,
     save: save,
     state: function () { return store; },
-    setState: function (s) { store = normalizeState(s); return store; },
+    setState: function (s) { store = normalizeState(s); invalidatePlans(); return store; },
     subscribe: function (fn) { listeners.push(fn); return function () { listeners = listeners.filter(function (l) { return l !== fn; }); }; },
     normalizeState: normalizeState,
     normalizePiece: normalizePiece,
@@ -3646,6 +3897,7 @@
       if (fields.scaleStep != null) { s.scaleStep = Math.max(0,Math.floor(num(fields.scaleStep,0))); syncPendingWarmup(); }
       if (fields.warmupMinutes != null) s.warmupMinutes = clamp(num(fields.warmupMinutes,2),0,5);
       if (fields.skippedDate === null) s.skippedDate = null;
+      if (fields.learnPromptDismissed !== undefined) s.learnPromptDismissed = fields.learnPromptDismissed;
       if (fields.maxLearning != null) s.maxLearning = Math.max(0, Math.round(num(fields.maxLearning, s.maxLearning)));
       if (fields.onBreak != null) s.onBreak = fields.onBreak === true;
       save();
@@ -3721,6 +3973,7 @@
 
     // pieces / composers
     pieceById: pieceById,
+    sectionById: sectionById,
     composerById: composerById,
     composerName: composerName,
     searchComposers: searchComposers,

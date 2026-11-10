@@ -9,7 +9,7 @@
  * indefinitely, with no error to tell you why.
  */
 
-var CACHE_VERSION = 'v67-flexible-sessions-20261104';
+var CACHE_VERSION = 'v69-simpler-20261110';
 var CACHE = 'repertoire-' + CACHE_VERSION;
 
 var ASSETS = [

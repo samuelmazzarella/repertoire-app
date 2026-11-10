@@ -88,7 +88,7 @@
     var date=view.logDate||A.todayISO(),entries=A.logEntries(date),rows=A.practiceLog(date),times=A.state().practiceTimes.filter(function(t){return t.date===date;});
     var html='<div class="row-between"><h1>Log</h1><button class="btn btn-sm" data-action="add-log">Add practice</button></div>'+
       '<div class="log-date-row"><button class="btn" data-action="log-prev" aria-label="Previous day">←</button><input aria-label="Log date" id="log-date" type="date" max="'+A.todayISO()+'" value="'+esc(date)+'"><button class="btn" data-action="log-next" aria-label="Next day"'+(date>=A.todayISO()?' disabled':'')+'>→</button></div>'+
-      '<p class="small muted">'+esc(longDate(date))+' · '+mins(times.reduce(function(n,t){return n+t.minutes;},0))+' min recorded</p>';
+      '<p class="small muted">'+esc(longDate(date))+' · '+mins(A.minutesOn(date))+' min recorded</p>';
     if(date!==A.todayISO())html+='<button class="btn btn-sm btn-quiet" data-action="log-today">Today</button>';
     if(!entries.length&&!rows.length)html+='<p class="empty-state">No practice recorded.</p>';
     entries.forEach(function(e){var h=e.history;html+='<article class="card log-entry"><div class="row-between"><b>'+esc(resultLabel(h))+'</b><button class="btn btn-sm" data-action="edit-log" data-key="'+esc(e.key)+'">Edit</button></div><h2>'+esc(e.title+(e.section?' — '+e.section:''))+'</h2><p class="small muted">'+esc(e.composer)+' · '+esc(PURPOSE_LABELS[e.timing?e.timing.purpose:h.purpose]|| (e.section?'Section practice':h.type==='technical'?'Technical check':h.type==='learning'?'Learning':'Review'))+(e.timing?' · '+mins(e.timing.minutes)+' min':'')+'</p>'+(h.note||h.achievement||h.focus?'<p>'+esc(h.note||h.achievement||h.focus)+'</p>':'')+'</article>';});
@@ -134,8 +134,16 @@
   function openSuggestions(){
     var list=A.practiceSuggestions();view.suggestions=list;
     var html='<h2>Practice suggestions</h2><p class="small muted">Nothing changes until you choose Apply.</p>';
-    if(!list.length)html+='<p>No changes suggested yet. Estimates need three completed, manually timed sessions of the same type. Longer intervals need six secure checks across the full current gap.</p>';
-    list.forEach(function(s,i){html+='<article class="suggestion"><h3>'+esc(s.label)+'</h3><p>'+(s.type==='timing'?esc(PURPOSE_LABELS[s.purpose])+': use <b>'+mins(s.to)+' min</b> instead of '+mins(s.from)+' min. Based on '+s.checks+' recent sessions.':'Try <b>'+s.to+' days</b> instead of '+s.from+'. '+s.checks+' secure checks across at least '+s.from+' days, without a later memory stumble.')+'</p><button class="btn btn-primary" data-action="accept-suggestion" data-index="'+i+'">Apply</button> <button class="btn btn-quiet" data-action="dismiss-suggestion" data-index="'+i+'">Not now</button></article>';});
+    if(!list.length)html+='<p>No changes suggested yet. Estimates need three completed, manually timed sessions of the same type. Longer maximum intervals need six secure checks at or near the current maximum. Consolidating pieces are offered a longer gap after three clean first attempts running, and promotion after two weeks.</p>';
+    var timings=list.filter(function(s){return s.type==='timing';}).length;
+    if(timings>1)html+='<button class="btn btn-block" data-action="accept-timing-suggestions">Apply all '+timings+' time estimates</button>';
+    list.forEach(function(s,i){
+      var text=s.type==='timing'?esc(PURPOSE_LABELS[s.purpose])+': use <b>'+mins(s.to)+' min</b> instead of '+mins(s.from)+' min. Based on '+s.checks+' recent sessions.':
+        s.type==='promote'?'Ready to <b>mark established</b>: '+plural(s.checks,'clean review')+' on separate days over '+plural(s.days,'day')+' of consolidation. Reviews start at every '+plural(s.to,'day')+' and lengthen after each clean one.':
+        s.type==='cadence'?'Try every <b>'+plural(s.to,'day')+'</b> instead of every '+plural(s.from,'day')+'. '+s.checks+' clean first attempts running at the current gap.':
+        'Try a maximum of <b>'+s.to+' days</b> instead of '+s.from+'. '+s.checks+' secure checks after '+s.near+' days or more, without a later memory stumble.';
+      html+='<article class="suggestion"><h3>'+esc(s.label)+'</h3><p>'+text+'</p><button class="btn btn-primary" data-action="accept-suggestion" data-index="'+i+'">Apply</button> <button class="btn btn-quiet" data-action="dismiss-suggestion" data-index="'+i+'">Not now</button></article>';
+    });
     openSheet(html+'<button class="btn btn-block" data-action="close-sheet">Close</button>');
   }
 
@@ -183,7 +191,9 @@
   function refresh() {
     launchInfo = A.launch();
     if (view.day !== launchInfo.today) { view.day = launchInfo.today; view.extra = null; view.minutes = null; view.customMinutes = null; }
-    if (view.extra == null) view.extra = A.practiceLog(launchInfo.today).length > 0;
+    /* Optional practice is something you ask for. After a partial session the
+       card simply offers what is still due, with nothing added. */
+    if (view.extra == null) view.extra = false;
     if (view.minutes == null) view.minutes = view.extra ? 15 : launchInfo.recommended || launchInfo.budget || 45;
     render();
   }
@@ -231,18 +241,16 @@
 
     html += '<h1>Today</h1>';
     html += '<p class="date-line">' + esc(longDate(today)) + '</p>';
-
-    html += renderNotices(today);
+    html += renderNotices(today, true);
     var returnPlan=A.state().settings.returnPlan;
-    if(returnPlan&&today<=returnPlan.end)html+='<p class="return-notice">Return week: overdue checks are spread through '+esc(longDate(returnPlan.end))+'.</p>';
-    html += renderPracticeLog(today);
-    html += renderSavedPlans(today);
+    var below = renderNotices(today, false);
+    if(returnPlan&&today<=returnPlan.end)below+='<p class="return-notice">Return week: overdue checks are spread through '+esc(longDate(returnPlan.end))+'.</p>';
     if(view.cancelledPlanId)html+='<p class="return-notice" role="status">Plan cancelled. Recorded practice kept. <button class="btn btn-sm" data-action="undo-cancel-plan">Undo</button></p>';
     if (A.state().settings.onBreak) {
-      root.innerHTML = html + '<section class="card"><h2>Taking a break</h2><p>No piano or no time: your records are saved. Review dates keep their meaning; missed days are not failures.</p><button class="btn btn-primary btn-block" data-action="end-break">I’m ready to practise</button></section>'; return;
+      root.innerHTML = html + '<section class="card"><h2>Taking a break</h2><p>No piano or no time: your records are saved. Review dates keep their meaning; missed days are not failures.</p><button class="btn btn-primary btn-block" data-action="end-break">I’m ready to practise</button></section>' + below + renderPracticeLog(today); return;
     }
     if (A.state().settings.skippedDate === today) {
-      root.innerHTML = html + '<section class="card"><h2>Taking today off</h2><p>Your pieces stay on their existing schedules.</p><button class="btn btn-block" data-action="unskip-day">I have time after all</button></section>'; return;
+      root.innerHTML = html + '<section class="card"><h2>Taking today off</h2><p>Your pieces stay on their existing schedules.</p><button class="btn btn-block" data-action="unskip-day">I have time after all</button></section>' + below + renderPracticeLog(today); return;
     }
 
     if (c.total === 0) {
@@ -269,56 +277,67 @@
       return;
     }
 
-    html += '<section class="card">';
-    html += '<h2>' + (view.extra ? 'Extra practice' : 'Plan a session') + '</h2>';
+    /* The card answers one question — how long, and go. Everything else
+       sits below it. */
+    var practised = A.practiceLog(today).length > 0;
+    var canStart = built.items.length || (built.warmup.minutes && !nothingToDo);
+    html += '<section class="card launch-card">';
+    html += '<h2>' + (view.extra ? 'Optional practice' : practised && !nothingToDo ? 'Continue today' : 'Today’s session') + '</h2>';
 
     if (view.extra) {
-      html += '<p class="ideal-line">Finish today’s reviews and add full play-throughs if there’s time. Learning comes last.</p>';
-    } else if (launchInfo.zeroBudgetDay) {
-      html += '<p class="headline" style="font-size:1.35rem">No session scheduled</p>';
-      html += '<p class="ideal-line">' + esc(DAYS[launchInfo.weekday]) + ' is set to 0 minutes. Practise anyway?</p>';
+      html += '<p class="ideal-line">Anything still due, then one full play-through of the piece you have gone longest without playing.</p>';
     } else if (nothingToDo) {
-      html += '<p class="headline">Nothing due</p>';
+      html += '<p class="headline">' + (practised ? 'Done for today' : 'Nothing due') + '</p>';
       html += '<p class="ideal-line">Next up ' + esc(nextDueSummary(today)) + '.</p>';
-    } else {
-      html += '<p class="headline">' + mins(built.plannedMin) + ' <small>min estimated</small></p>';
+    } else if (launchInfo.zeroBudgetDay) {
+      html += '<p class="ideal-line">' + esc(DAYS[launchInfo.weekday]) + ' is a rest day. Practise anyway?</p>';
+    }
+    if (canStart && (view.extra || !nothingToDo)) {
+      html += '<p class="headline">' + mins(built.plannedMin) + ' <small>min · ' + plural(built.items.length, 'item') + '</small></p>';
     }
 
-    var counts = [];
-    if (c.learning) counts.push(c.learning + ' learning');
-    counts.push(c.due + ' due');
-    if (c.repair) counts.push(c.repair + ' in repair');
-    
-    html += '<p class="counts">' + counts.map(function (x) {
-      return '<span>' + x + '</span>';
-    }).join('') + '</p>';
-
-    if (view.extra) html += '<p><b>' + mins(built.plannedMin) + ' min estimated</b></p>';
-    
-    if (built.allowanceMin) html += '<p class="small muted">Includes ' + mins(built.allowanceMin) + ' min for extra work on difficult passages.</p>';
-
-    html += '<p class="plan-preview">' + planPreview(built) + '</p>';
-    html += warmupPreview(built.warmup);
-    html += '<div class="time-options"><button class="btn btn-block" data-action="less-time">I have less time today</button><button class="btn btn-block" data-action="more-time">I have more time today</button></div>';
+    if (canStart || view.customMinutes != null) {
+      html += '<button class="btn btn-primary btn-block" data-action="start"' + (!canStart ? ' disabled' : '') + '>Start</button>';
+      html += '<div class="two-up"><button class="btn" data-action="less-time">Less time</button><button class="btn" data-action="more-time">More time</button></div>';
+    }
     if(view.customMinutes!=null)html+='<p class="small">'+mins(view.customMinutes)+' min available for this session. <button class="btn btn-sm btn-quiet" data-action="suggested-time">Use suggested plan</button></p>'+deferredPreview(built);
-    if(!built.items.length)html+='<p class="small muted">'+(built.warmup.minutes?'Only the warmup fits. Choose more time to include a piece.':'No work fits this allowance. Choose more time, or take today off.')+'</p>';
+    if(!built.items.length&&view.customMinutes!=null)html+='<p class="small muted">'+(built.warmup.minutes?'Only the warmup fits. Choose more time to include a piece.':'No work fits this allowance. Choose more time, or take today off.')+'</p>';
 
-    html += '<div class="stack" style="margin-top:16px">' +
-      '<button class="btn btn-primary btn-block" data-action="start"'+(!built.items.length&&!built.warmup.minutes?' disabled':'')+'>' + (view.extra ? 'Start extra practice' : 'Start') + '</button>';
-    if (!view.extra) html += '<button class="btn btn-quiet btn-block" data-action="skip-today">' +
-      (launchInfo.zeroBudgetDay ? 'Not today' : 'Skip today') + '</button>' +
-      '<button class="btn btn-quiet btn-block" data-action="optional-practice">Plan optional practice</button>';
-    if(view.extra)html+='<button class="btn btn-quiet btn-block" data-action="normal-plan">Back to today’s plan</button>';
-    html += '</div>';
+    var detail = [planPreview(built)];
+    if (c.repair) detail.push(c.repair + ' in repair');
+    if (built.warmup && built.warmup.minutes) detail.push('starts with ' + esc(built.warmup.scale));
+    if (built.allowanceMin) detail.push(mins(built.allowanceMin) + ' min allowed for difficult passages');
+    html += '<p class="plan-preview small muted">' + detail.filter(Boolean).join(' · ') + '</p>';
 
+    html += '<div class="quiet-links">';
+    if (view.extra) html += '<button class="btn btn-quiet" data-action="normal-plan">Back to today’s plan</button>';
+    else html += (nothingToDo ? '' : '<button class="btn btn-quiet" data-action="skip-today">' + (practised ? 'Stop for today' : launchInfo.zeroBudgetDay ? 'Not today' : 'Skip today') + '</button>') +
+      '<button class="btn btn-quiet" data-action="optional-practice">Optional practice</button>';
+    html += '<button class="btn btn-quiet" data-action="start-break">Take a break</button>' +
+      '<button class="btn btn-quiet" data-action="practice-settings">Settings</button></div>';
     html += '</section>';
 
-    html += '<div class="row-between session-options"><button class="btn btn-quiet" data-action="start-break">No piano / take a break</button><button class="btn btn-quiet" data-action="practice-settings">Practice settings</button></div>';
-    if (view.extra) html += '<details class="card next-session"><summary>Preview next session (' + built.items.length + ' items)</summary><p class="small muted">These are suggestions for your next session, not a record of today’s practice.</p>' + renderPlan(built.items,null,'Suggested next session') + '</details>';
-    else html += renderPlan(built.items,null,'Proposed session');
+    html += renderLearnNext();
+    html += below;
+    html += renderSavedPlans(today);
+    if (view.extra) html += '<details class="card next-session"><summary>What’s in it (' + plural(built.items.length, 'item') + ')</summary>' + renderPlan(built.items,null,'') + '</details>';
+    else html += renderPlan(built.items,null,'In this session');
+    html += renderPracticeLog(today);
     html += renderForecast(launchInfo.forecast, today);
 
     root.innerHTML = html;
+  }
+
+  function renderLearnNext() {
+    var n = launchInfo.learnNext;
+    if (!n || n.dismissed) return '';
+    var p = n.piece, known = {near: 'nearly memorised', played: 'played before', 'new': 'new to you'}[p.priorKnowledge];
+    return '<section class="card learn-next"><div class="row-between"><h2>A learning slot is free</h2>' +
+      '<button class="dismiss" data-action="dismiss-learn-next" aria-label="Dismiss">&times;</button></div>' +
+      '<p>Next in tier ' + n.tier + ': <b>' + esc(A.composerName(p.composerId)) + ' — ' + esc(p.title) + '</b>' +
+      '<br><span class="small muted">' + esc((p.catalogue ? p.catalogue + ' · ' : '') + mins(p.durationMin) + ' min · ' + known) + '</span></p>' +
+      '<div class="two-up"><button class="btn btn-primary" data-action="learn-next" data-id="' + esc(p.id) + '">Start learning</button>' +
+      '<button class="btn" data-action="browse-tier" data-tier="' + n.tier + '">Choose another</button></div></section>';
   }
 
   function deferredPreview(built) {
@@ -379,7 +398,7 @@
   }
 
   function renderPlan(items, session, title) {
-    var html = '<section class="card day-plan"><h2>' + esc(title || (session ? 'Session overview' : 'Proposed session')) + '</h2>';
+    var html = '<section class="card day-plan">' + (title === '' ? '' : '<h2>' + esc(title || 'Session overview') + '</h2>');
     if (!items.length) return html + '<p class="muted">No reviews in this session.</p></section>';
     html += '<ol>';
     items.forEach(function (entry, i) {
@@ -387,14 +406,13 @@
       if (!p) return;
       var sec = entry.sectionId && p.sections.find(function (x) { return x.id === entry.sectionId; });
       var r = session && session.results[i];
-      var status = !r ? 'To do' : r.finished===false ? 'In progress' : r.skipped ? 'Skipped' : r.learning ? 'Recorded' : (r.grade === 'broke' ? 'Broke down' : r.grade === 'clean' ? 'Clean' : 'Wobbled');
-      var label = entry.kind==='technical'?'Technical follow-up':sec ? sec.label : entry.kind === 'continuity' ? 'Full play-through' : entry.kind === 'learning' ? 'Learning' : p.state === 'repair' ? 'Repair' : p.state === 'consolidating' && p.focusedMinutes ? 'Focused practice' : 'Whole piece';
+      var status = !r ? '' : r.finished===false ? 'in progress' : r.skipped ? 'skipped' : r.learning ? 'recorded' : (r.grade === 'broke' ? 'broke down' : r.grade === 'clean' ? 'clean' : 'wobbled');
+      var kind = entry.kind==='technical'?'technical follow-up':sec ? 'section' : entry.kind === 'continuity' ? 'play-through' : entry.kind === 'learning' ? 'learning' : p.state === 'repair' ? 'repair' : p.state === 'consolidating' && p.focusedMinutes ? 'focused practice' : '';
       html += '<li class="' + (r ? 'plan-recorded' : '') + '">' +
         (session ? '<button class="plan-item" data-action="resume-item" data-index="' + i + '">' : '<div class="plan-item">') +
-        '<span class="plan-title">' + esc(p.title) + '</span><span class="plan-meta">' +
-        esc(A.composerName(p.composerId) + (p.catalogue ? ' · ' + p.catalogue : '')) + '</span>' +
-        '<span class="plan-meta">' + esc(label) + ' · ' + mins(entry.estMin) + ' min' +
-        (session ? ' · ' + status : '') + '</span>' + (session ? '</button>' : '</div>') + '</li>';
+        '<span class="plan-title">' + esc(p.title + (sec ? ' — ' + sec.label : '')) + '</span><span class="plan-meta">' +
+        esc([A.composerName(p.composerId), p.catalogue, kind, mins(entry.estMin) + ' min', status].filter(Boolean).join(' · ')) +
+        '</span>' + (session ? '</button>' : '</div>') + '</li>';
     });
     return html + '</ol></section>';
   }
@@ -441,9 +459,9 @@
     if (b.maintenance.length) parts.push(b.maintenance.length + ' maintenance');
     if (b.continuity && b.continuity.length) parts.push(plural(b.continuity.length, 'full play-through'));
     if (b.lookahead.length) parts.push(b.lookahead.length + ' pulled forward');
-    if (!parts.length) return b.warmup && b.warmup.minutes ? 'Scale warmup only; no pieces fit or need another review.' : 'No pieces fit or need another review.';
+    if (!parts.length) return '';
 
-    var out = parts.join(' · ') + ' — about ' + mins(b.plannedMin) + ' min.';
+    var out = parts.join(' · ');
 
     if (b.learningYielded > 0) {
       out += '<br><span class="defer">' + plural(b.learningYielded, 'learning slot') +
@@ -462,10 +480,23 @@
     return out;
   }
 
-  function renderNotices(today) {
+  /* Urgent notices (unsaved or nearly full storage) sit above the session
+     card. The rest wait below it: they inform, they do not block. */
+  function renderNotices(today, urgent) {
     var html = '';
-    var g = launchInfo.gap;
-    if (g.show && !view.dismissedGap) {
+    if (urgent) {
+      if (launchInfo.storage && launchInfo.storage.warn) {
+        html += '<div class="notice notice-warn"><p>App storage is ' + Math.round(launchInfo.storage.ratio * 100) +
+          '% full. Export a backup now; when it fills, new practice cannot be saved.</p></div>';
+      }
+      if (launchInfo.storagePersistent === false) {
+        html += '<div class="notice notice-warn"><p>Storage is not persisting in this browser. ' +
+          'Export before you close the tab.</p></div>';
+      }
+      return html;
+    }
+    var g = launchInfo.gap, returning = A.state().settings.returnPlan;
+    if (g.show && !view.dismissedGap && !(returning && today <= returning.end)) {
       html += '<div class="notice"><p>' + plural(g.missedDays, 'practice day') +
         ' since your last session — ' + plural(g.count, 'review') + ' re-prioritised.</p>' +
         '<button class="dismiss" data-action="dismiss-gap" aria-label="Dismiss">&times;</button></div>';
@@ -477,15 +508,17 @@
         mins(n.budgetPerPracticeDay) + '-minute budget. You can pause learning or change your budget in Practice settings.</p>' +
         '<button class="dismiss" data-action="dismiss-nudge" aria-label="Dismiss">&times;</button></div>';
     }
+    if (launchInfo.suggestions && !view.dismissedSuggestions) {
+      html += '<div class="notice"><p>' + plural(launchInfo.suggestions, 'practice suggestion') +
+' waiting. ' +
+        '<button class="btn btn-sm" data-action="suggestions" style="margin-left:4px">Review</button></p>' +
+        '<button class="dismiss" data-action="dismiss-suggestions" aria-label="Dismiss">&times;</button></div>';
+    }
     if (launchInfo.exportReminder && !view.dismissedExport) {
       html += '<div class="notice"><p>No backup for ' +
         plural(launchInfo.exportReminder.days, 'day') + '. ' +
         '<button class="btn btn-sm" data-action="export" style="margin-left:4px">Export</button></p>' +
         '<button class="dismiss" data-action="dismiss-export" aria-label="Dismiss">&times;</button></div>';
-    }
-    if (launchInfo.storagePersistent === false) {
-      html += '<div class="notice notice-warn"><p>Storage is not persisting in this browser. ' +
-        'Export before you close the tab.</p></div>';
     }
     return html;
   }
@@ -500,7 +533,7 @@
   function timerText(ms) {var seconds=Math.floor(ms/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
   function timerControls() {
     var t=A.timerInfo();
-    return '<div class="timer-label">Timing: '+esc(PURPOSE_LABELS[t.purpose])+'</div><div class="practice-timer"><b id="elapsed-time" aria-label="Elapsed practice time">'+(t.started?timerText(t.milliseconds):'Not started')+'</b><button class="btn '+(!t.started?'btn-primary':'')+'" data-action="toggle-timer"'+(t.finished?' disabled':'')+'>'+ (t.finished?'Recorded':t.running?'Pause':t.started?'Resume':'Start practice')+'</button></div><details class="timer-options"><summary>Timing options</summary><p class="tiny muted">Time all work on this item, including repetitions and corrections. Pause for breaks. Changing this label affects estimates, not the result or review schedule.</p><label for="timing-purpose">Practice type</label><select id="timing-purpose"'+(t.finished?' disabled':'')+'>'+purposeOptions(t.purpose)+'</select><button class="btn btn-sm btn-quiet" data-action="adjust-timer">Correct time</button></details>';
+    return '<div class="practice-timer"><b id="elapsed-time" aria-label="Elapsed practice time">'+(t.started?timerText(t.milliseconds):'0:00')+'</b><button class="btn '+(!t.started?'btn-primary':'')+'" data-action="toggle-timer"'+(t.finished?' disabled':'')+'>'+ (t.finished?'Recorded':t.running?'Pause':t.started?'Resume':'Start timer')+'</button></div><details class="timer-options"><summary>Timing: '+esc(PURPOSE_LABELS[t.purpose])+'</summary><p class="tiny muted">Time all work on this item, including repetitions and corrections. Pause for breaks. After Done, the next item’s timer starts by itself if this one was running. Changing the practice type affects estimates, not the result or review schedule.</p><label for="timing-purpose">Practice type</label><select id="timing-purpose"'+(t.finished?' disabled':'')+'>'+purposeOptions(t.purpose)+'</select><button class="btn btn-sm btn-quiet" data-action="adjust-timer">Correct time</button></details>';
   }
   function beginVisibleTimer() {A.ensureTimer();}
 
@@ -529,7 +562,7 @@
     var prog = A.sessionProgress();
 
     /* Progress strip doubles as navigation — tap any segment to jump. */
-    var html = '<div class="session-view"><button class="btn session-pause" data-action="pause-session">Pause &amp; view plan</button><div class="progress">';
+    var html = '<div class="session-view"><div class="session-top"><div class="progress">';
     for (var i = 0; i < session.plan.length; i++) {
       var r = session.results[i];
       var cls = r ? (r.skipped ? 'skipped' : 'done') : '';
@@ -537,7 +570,7 @@
       html += '<button class="' + cls.trim() + '" data-action="goto" data-index="' + i +
         '" aria-label="Item ' + (i + 1) + '"></button>';
     }
-    html += '</div>';
+    html += '</div><button class="btn btn-sm session-pause" data-action="pause-session">Pause · plan</button></div>';
 
     html += '<div class="now-playing">';
     html += '<span class="kind-badge">' + kindLabel + ' · ' + (it.index + 1) + ' of ' + it.total + '</span>';
@@ -554,8 +587,8 @@
     } else {
       html += it.kind==='technical'?' · focused check · memory interval unchanged':' · every ' + subject.intervalDays + 'd · ' + subject.state;
     }
-    html += ' <button class="btn btn-sm btn-quiet np-edit" data-action="edit-piece" data-id="' +
-      esc(p.id) + '">Edit</button></p>';
+    html += ' <button class="btn btn-sm btn-quiet np-edit" data-action="edit-practice-notes" data-id="' +
+      esc(p.id) + '" data-section-id="' + esc(sec ? sec.id : '') + '">Edit</button></p>';
 
     if(it.kind==='technical'){
       html += '<div class="section-prompt"><strong>Check the troublesome passage before drilling it.</strong><p class="small">Work on the technical problem you flagged'+(sec?' in '+esc(sec.label):'')+'. This is a focused check, not a whole-piece memory test. Two clean checks on separate days clear the follow-up; other results keep a two-day check.</p></div>';
@@ -565,16 +598,13 @@
       var bars = sec.startBar ? ' · bar ' + sec.startBar + (sec.endBar ? '–' + sec.endBar : '') : '';
       html += '<div class="section-prompt"><strong>' + esc(prompt + sec.label) + '</strong>' +
         '<p class="small">' + esc(bars ? bars.slice(3) : '') + '</p>' +
-        '<p class="small muted">Check this section before rehearsing it. This result changes only its own schedule.</p>' +
         (sec.notes ? '<p>' + esc(sec.notes) + '</p>' : '') + '</div>';
-    } else if (!isLearning) {
-      html += '<p class="small muted">' + (it.kind === 'continuity' ? 'Play the whole piece from memory for continuity. Grade the first run; an early Clean result will not lengthen its interval.' : p.state === 'repair' ? 'Repair the parts that need work. Grade the first attempt you use to check recall.' :
-        p.state === 'consolidating' && p.focusedMinutes ? 'Use this slot for focused practice. Grade the first attempt you use to check recall.' :
-        'Whole-piece review. Grade your first attempt from memory, before practising this piece.') + '</p>';
+    } else if (!isLearning && (it.kind === 'continuity' || p.state === 'repair' || (p.state === 'consolidating' && p.focusedMinutes))) {
+      html += '<p class="small muted">' + (it.kind === 'continuity' ? 'Play the whole piece from memory for continuity. Grade the first run; an early Clean counts only for the days since you last played it.' : p.state === 'repair' ? 'Repair the parts that need work. Grade the first attempt you use to check recall.' :
+        'Use this slot for focused practice. Grade the first attempt you use to check recall.') + '</p>';
     }
     if (!isLearning && p.learningFocus) html += '<p class="np-notes"><b>Your practice focus:</b> ' + esc(p.learningFocus) + '</p>';
     if (p.notes) html += '<div class="np-notes">' + esc(p.notes) + '</div>';
-    html += '<button class="btn btn-sm btn-quiet" data-action="edit-practice-notes" data-id="' + esc(p.id) + '" data-section-id="' + esc(sec ? sec.id : '') + '">Edit notes and sections</button>';
     html += '</div>';
 
     if (it.result) {
@@ -600,7 +630,7 @@
           var selected=!!it.result&&it.result.grade===choice[0]&&!it.result.skipped;
           return '<button class="grade'+(selected?' is-selected':'')+'" data-grade="'+choice[0]+'" aria-label="'+choice[1]+'" aria-pressed="'+selected+'">'+(selected?'<span aria-hidden="true">✓ </span>':'')+choice[1]+'</button>';
         }).join('') +
-        '</div>'+outcomeControls(it)+'<p class="small muted">Grade the first attempt. Finish any practice before tapping Done.</p><button class="btn btn-primary btn-block" data-action="done-item"'+(!it.result||it.result.skipped?' disabled':'')+'>Done — next</button>' + gradeHelp(it.kind==='technical');
+        '</div>'+outcomeControls(it)+'<div class="done-bar"><button class="btn btn-primary btn-block" data-action="done-item"'+(!it.result||it.result.skipped?' disabled':'')+'>'+(!it.result||it.result.skipped?'Grade your first attempt':'Done — next')+'</button></div>' + gradeHelp(it.kind==='technical');
     }
 
     html += '<div class="nav-row">' +
@@ -623,7 +653,7 @@
     if(!it.result||it.result.skipped||it.kind==='technical')return '';
     var issue=it.result.issue||'memory',clean=it.result.grade==='clean';
     var options=clean?[['memory','Secure'],['effort','Needed thought']]:[['memory','Memory stumble'],['technical-slip','One-off technical slip'],['technical-problem','Recurring technical problem']];
-    var text=issue==='technical-slip'?'Practise the spot now. The review interval stays unchanged.':issue==='technical-problem'?'A focused check is due in two days. Two clean checks clear it; the memory interval stays unchanged. Use Edit notes and sections to name the passage if needed.':issue==='effort'?'Correct recall with effort: keep the current interval.':
+    var text=issue==='technical-slip'?(A.repeatedSlip(it.subject)?'Second review running with a technical slip. If it is the same passage, choose Recurring technical problem so it gets its own focused checks. ':'')+'Practise the spot now. The review interval stays unchanged.':issue==='technical-problem'?'A focused check is due in two days. Two clean checks clear it; the memory interval stays unchanged. Use Edit notes and sections to name the passage if needed.':issue==='effort'?'Correct recall with effort: keep the current interval.':
       it.subject.state==='consolidating'&&it.subject.practiceDifficulty<=2?'Two secure first attempts across the current gap earn the next interval. Memory trouble returns to a shorter gap.':'The memory schedule follows this grade.';
     return '<div class="outcome-controls"><p class="small"><b>'+(clean?'How did recall feel?':'What caused it?')+'</b></p>'+options.map(function(o){return '<button class="btn btn-sm'+(issue===o[0]?' is-selected':'')+'" data-action="grade-issue" data-issue="'+o[0]+'" aria-pressed="'+(issue===o[0])+'">'+(issue===o[0]?'✓ ':'')+o[1]+'</button>';}).join('')+'<p class="small muted" aria-live="polite">'+text+'</p></div>';
   }
@@ -631,9 +661,11 @@
   function gradeHelp(technical) {
     if(technical)return '<details class="grade-help"><summary>What do the grades mean?</summary><p><b>Clean:</b> The passage was controlled on the first attempt at your intended tempo.</p><p><b>Wobbled or Broke down:</b> The technical problem still needs work. Check again in two days, or the next available practice day.</p><p>Two clean checks on separate days clear this follow-up. These checks do not change your memory interval or mark the whole piece learned.</p></details>';
     return '<details class="grade-help"><summary>What do the grades mean?</summary>' +
+      '<p>Grade your first attempt from memory, before practising the piece. Then practise whatever needs it and tap Done. A section check changes only that section’s schedule.</p>' +
       '<p><b>Clean:</b> Recalled independently at the intended tempo, with no meaningful memory hesitation.</p>' +
-      '<p><b>Wobbled:</b> Recalled without the score, but hesitated or needed to recover.</p>' +
+      '<p><b>Wobbled:</b> Recalled without the score, but hesitated or needed to recover. One memory wobble holds the interval; a second running shortens it by a quarter.</p>' +
       '<p><b>Broke down:</b> Needed the score, a prompt, or substantial reconstruction.</p>' +
+      '<p>Intervals follow the days that actually passed. A Clean after a longer gap than scheduled earns credit for half the extra days; a Clean played early earns credit only for the gap it covered.</p>' +
       '<p>After Wobbled or Broke down, choose the cause. One-off technical slips hold the interval. Recurring technical problems add focused checks every two days, cleared by two clean checks on separate days. Technical checks never certify whole-piece memory.</p>' +
       '<p>Repair ends after three Clean checks on separate days. Wobbled does not count; Broke down restarts the count.</p></details>';
   }
@@ -652,7 +684,7 @@
       '<div class="field"><label for="learning-next">Next focus</label>' +
       '<textarea id="learning-next" placeholder="Optional — what you want to work on next">' +
       esc(draft ? draft.nextFocus : it.result && it.result.nextFocus || '') + '</textarea></div>' +
-      '<button class="btn btn-primary btn-block" data-action="save-learning">Done — next</button></div>';
+      '<div class="done-bar"><button class="btn btn-primary btn-block" data-action="save-learning">Done — next</button></div></div>';
   }
 
   function renderSummary(root, today) {
@@ -735,11 +767,9 @@
 
     html += '<div class="row-between"><h1>Repertoire</h1>' +
       '<button class="btn btn-sm" data-action="add-piece">Add piece</button></div>';
-    html += '<p class="date-line">' + s.pieces.length + ' pieces · ' + s.composers.length + ' composers</p>';
-
-    html += renderCapacityCard();
-    var suggestions=A.practiceSuggestions();
-    html+='<button class="btn btn-block" data-action="suggestions">Practice suggestions'+(suggestions.length?' ('+suggestions.length+')':'')+'</button>';
+    var cov = launchInfo.coverage;
+    html += '<p class="date-line">' + s.pieces.length + ' pieces · ' + cov.ready + ' ready to play · ' +
+      cov.composers + ' of ' + cov.totalComposers + ' composers</p>';
 
     html += '<div class="filters">';
     html += '<input type="search" id="f-search" placeholder="Search title, composer, tag, note" value="' +
@@ -753,13 +783,6 @@
       A.STATES.map(function (st) {
         return '<option value="' + st + '"' + (view.filters.state === st ? ' selected' : '') +
           '>' + st + '</option>';
-      }).join('') + '</select>';
-    html += '<select id="f-composer"><option value="">All composers</option>' +
-      s.composers.slice().sort(function (a, b) {
-        return a.canonicalName < b.canonicalName ? -1 : 1;
-      }).map(function (c) {
-        return '<option value="' + esc(c.id) + '"' + (view.filters.composerId === c.id ? ' selected' : '') +
-          '>' + esc(c.canonicalName) + '</option>';
       }).join('') + '</select>';
     html += '</div>';
 
@@ -811,19 +834,22 @@
     if (listOnly && el('repertoire-results')) { el('repertoire-results').innerHTML = html.slice(listStart); return; }
     html += '</div>';
 
+    html += renderCapacityCard();
     html += '<div class="stack" style="margin-top:22px">' +
+      '<button class="btn btn-block" data-action="suggestions">Practice suggestions' + (launchInfo.suggestions ? ' (' + launchInfo.suggestions + ')' : '') + '</button>' +
       '<button class="btn btn-block" data-action="practice-settings">Practice settings</button>' +
       '<button class="btn btn-block" data-action="export">Export backup</button>' +
       '<button class="btn btn-block" data-action="copy-export">Copy backup to clipboard</button>' +
       '<button class="btn btn-block" data-action="import">Import JSON</button>' +
-      '</div><p class="tiny muted">Repertoire ' + A.VERSION + '</p>';
+      '</div><p class="tiny muted">Repertoire ' + A.VERSION + ' · storage ' +
+      (launchInfo.storage.chars / 1e6).toFixed(2) + ' of about ' + (launchInfo.storage.quotaChars / 1e6).toFixed(1) +
+      ' MB (' + Math.round(launchInfo.storage.ratio * 100) + '%)</p>';
 
     root.innerHTML = html;
 
     el('f-search').oninput = function () { view.filters.search = this.value; renderRepertoire(true); };
     el('f-tier').onchange = function () { view.filters.tier = this.value; renderRepertoire(true); };
     el('f-state').onchange = function () { view.filters.state = this.value; renderRepertoire(true); };
-    el('f-composer').onchange = function () { view.filters.composerId = this.value; renderRepertoire(true); };
   }
 
   function renderCapacityCard() {
@@ -922,7 +948,7 @@
         '</div>';
     }
 
-    if (d.state === 'consolidating') html += '<details class="grade-help"><summary>About consolidation</summary><p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; the interval grows after clean reviews.</p></details>';
+    if (d.state === 'consolidating') html += '<details class="grade-help"><summary>About consolidation</summary><p class="small muted">Promotion is your choice. The app suggests it after 14 calendar days in consolidation and two clean reviews on separate days since the last breakdown. Early reviews do not count. Choose Mark established when ready; reviews continue at the gap reached here and lengthen after clean ones.</p></details>';
     if(d.state==='consolidating'&&d.practiceDifficulty<=2&&!d.sectionFirst){
       var suggestion=A.consolidationSuggestion(A.pieceById(d.id));
       html += '<details class="grade-help"><summary>How spacing grows</summary><p class="small muted">Easy consolidating pieces progress through 1, 2, 3, 5, 7, 10 and 14 days. Two secure first attempts across the current gap earn the next step, within the maximum interval. Weekends count. Needed thought holds the interval; a memory wobble returns to a shorter proven gap; a breakdown adds a next-day check. Promotion to established remains your choice.</p></details>';
@@ -1207,7 +1233,7 @@
 
       case 'toggle-timer': if(A.timerInfo().running)A.pauseTimer();else A.startTimer();renderToday();break;
       case 'adjust-timer': {A.pauseTimer();var value=prompt('Practice minutes (excluding breaks):',mins(A.timerInfo().milliseconds/60000));if(value!==null&&value.trim()!==''&&Number.isFinite(+value)&&+value>=0)A.adjustTimer(+value);renderToday();break;}
-      case 'done-item': A.finishTimedItem();refresh();window.scrollTo(0,0);break;
+      case 'done-item': {var running=A.timerInfo().running;if(A.finishTimedItem()&&running)A.startTimer();refresh();window.scrollTo(0,0);break;}
       case 'optional-practice': view.extra = true; view.customMinutes = null; refresh(); break;
       case 'normal-plan': view.extra=false; view.customMinutes=null; refresh(); break;
       case 'suggested-time': view.customMinutes=null; refresh(); break;
@@ -1221,7 +1247,7 @@
       }
       case 'cancel-plan': {captureLearningDraft();var live=A.state().session,id=t.getAttribute('data-id');view.cancelledPlanId=A.cancelPlan(id);if(live&&live.id===id){view.extra=null;view.customMinutes=null;}refresh();window.scrollTo(0,0);break;}
       case 'undo-cancel-plan': A.restoreCancelledPlan(view.cancelledPlanId);view.cancelledPlanId=null;refresh();break;
-      case 'warmup-done': A.markWarmup(true); refresh(); break;
+      case 'warmup-done': {var warm=A.timerInfo().running;A.markWarmup(true);if(warm)A.startTimer();refresh();window.scrollTo(0,0);break;}
       case 'warmup-skip': A.markWarmup(false); refresh(); break;
       case 'plan-extra': A.endSession(); view.extra = true; view.customMinutes = null; refresh(); openSessionAllowance('extra'); break;
       case 'replan': openSessionAllowance('active'); break;
@@ -1326,7 +1352,8 @@
 
       case 'save-learning':
         if (A.state().session && A.state().session.date !== A.todayISO()) A.resumeSession(A.todayISO(), A.state().session.index);
-        A.finishTimedItem({focus: el('learning-focus').value, achievement: el('learning-achievement').value, nextFocus: el('learning-next').value});
+        {var learningRan=A.timerInfo().running;
+        if(A.finishTimedItem({focus: el('learning-focus').value, achievement: el('learning-achievement').value, nextFocus: el('learning-next').value})&&learningRan)A.startTimer();}
         renderToday(); window.scrollTo(0, 0); break;
       case 'retry-save': A.save(); renderSaveStatus(); break;
 
@@ -1347,6 +1374,17 @@
       case 'dismiss-gap': view.dismissedGap = true; renderToday(); break;
       case 'dismiss-nudge': view.dismissedNudge = true; renderToday(); break;
       case 'dismiss-export': view.dismissedExport = true; renderToday(); break;
+      case 'dismiss-suggestions': view.dismissedSuggestions = true; renderToday(); break;
+      case 'dismiss-learn-next': A.updateSettings({learnPromptDismissed: launchInfo.learnNext ? launchInfo.learnNext.key : null}); refresh(); break;
+      case 'learn-next': A.startLearning(t.getAttribute('data-id')); view.minutes = null; refresh(); break;
+      case 'browse-tier':
+        view.tab = 'repertoire';
+        view.filters = { tier: t.getAttribute('data-tier'), state: 'backlog', composerId: '', search: '' };
+        view.openTiers[t.getAttribute('data-tier')] = true;
+        render(); window.scrollTo(0, 0); break;
+      case 'accept-timing-suggestions':
+        (view.suggestions||[]).filter(function(s){return s.type==='timing';}).forEach(function(s){A.respondToSuggestion(s.pieceId,s.sectionId,s.key,true);});
+        openSuggestions();break;
 
       case 'toggle-tier': {
         var tier = t.getAttribute('data-tier');
@@ -1522,7 +1560,7 @@
   setInterval(function(){
     if(!view.booted)return;
     var timer=A.timerInfo(),label=el('elapsed-time');
-    if(label)label.textContent=timer.started?timerText(timer.milliseconds):'Not started';
+    if(label)label.textContent=timer.started?timerText(timer.milliseconds):'0:00';
     if(timer.running&&++ticks%5===0)A.checkpointTimer();
     if(timer.running&&document.visibilityState==='visible'&&navigator.wakeLock&&!wakeLock&&!wakePending){
       wakePending=true;navigator.wakeLock.request('screen').then(function(lock){wakeLock=lock;lock.addEventListener('release',function(){wakeLock=null;});}).catch(function(){}).finally(function(){wakePending=false;});
@@ -1536,6 +1574,12 @@
 
   /* Registration is best-effort: file:// and any non-secure origin will
      reject it, and the app works fine without it. */
+  /* Ask iOS not to evict this origin's data under storage pressure. A
+     request, not a guarantee, so the export reminder stays. */
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(function () { /* unsupported or refused */ });
+  }
+
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () { /* no offline cache */ });

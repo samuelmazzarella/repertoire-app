@@ -523,6 +523,7 @@ h1 {
   max-width: 720px;
   margin: 0 auto;
   max-height: 92vh;
+  max-height: 92dvh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: var(--bg);
@@ -678,7 +679,7 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .bar-wrap{height:80px;min-height:80px;}
 .bar-col>.tiny{white-space:nowrap;font-size:.65rem;}
 
-.outcome-controls {margin:1rem 0;padding:1rem;border:1px solid var(--border);border-radius:12px;}
+.outcome-controls {margin:1rem 0;padding:1rem;border:1px solid var(--line);border-radius:12px;}
 .outcome-controls .btn {margin:0 .3rem .5rem 0;}
 .outcome-controls .is-selected {background:#364a51;border:2px solid #82a6b4;color:#fff;}
 
@@ -704,4 +705,29 @@ input[type="date"] { background: var(--surface); color: var(--ink); border: 1px 
 .allowance-items li { margin-bottom:8px; }
 .deferred-preview { margin:12px 0; font-size:.9rem; }
 .deferred-preview summary { cursor:pointer; }
-.saved-plan + .saved-plan { border-top:1px solid var(--border); margin-top:16px; padding-top:8px; }
+.saved-plan + .saved-plan { border-top:1px solid var(--line); margin-top:16px; padding-top:8px; }
+
+/* 6.9 — the session screen fits one phone screen; Today leads with Start. */
+.session-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.session-top .progress { flex: 1 1 auto; margin: 0; min-width: 0; }
+.session-top .session-pause { flex: 0 0 auto; width: auto; margin: 0; }
+.kind-badge { margin-bottom: 10px; align-self: center; }
+.np-meta { margin-top: 10px; }
+.np-notes { margin-top: 12px; padding-top: 10px; }
+.practice-timer { justify-content: center; padding: 6px 0; margin: 6px 0 0; border-top: 0; }
+.timer-options { margin: 0 0 4px; text-align: center; font-size: .85rem; }
+.timer-options[open] { text-align: left; }
+.grades { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.grade { min-height: 64px; padding: 0 4px; font-size: 1rem; }
+.done-bar { position: sticky; bottom: calc(58px + env(safe-area-inset-bottom)); z-index: 5; background: var(--bg); padding: 10px 0; margin-top: 8px; }
+.done-bar .btn { min-height: 54px; font-size: 1.05rem; }
+.done-bar .btn[disabled] { opacity: .45; }
+.launch-card h2 { margin: 0 0 6px; font-size: 1rem; color: var(--muted); font-weight: 500; }
+.launch-card > .btn-primary { min-height: 56px; font-size: 1.1rem; margin-top: 14px; }
+.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.quiet-links { display: flex; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.quiet-links .btn { font-size: .86rem; padding: 0 10px; }
+.learn-next h2 { margin: 0; font-size: 1rem; }
+.learn-next .dismiss { background: none; border: 0; color: var(--faint); font-size: 1.2rem; padding: 4px 8px; }
+.day-plan li { padding: 6px 0; }
+.next-session .day-plan { margin: 0; }
